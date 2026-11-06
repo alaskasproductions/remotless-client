@@ -1,0 +1,41 @@
+# Remotless: weekly check for new RustDesk releases and security advisories.
+# REMOTLESS_UPSTREAM.txt holds the RustDesk version Remotless is based on. When RustDesk publishes a
+# newer release (or a new security advisory), this run FAILS on purpose, so GitHub e-mails the owner.
+# After merging the update (git fetch upstream && git merge <tag>), put the new version in the file.
+name: Remotless upstream watch
+
+on:
+  schedule:
+    - cron: "17 7 * * 1" # Mondays 07:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Compare with RustDesk's latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ours=$(tr -d '[:space:]' < REMOTLESS_UPSTREAM.txt)
+          latest=$(gh api repos/rustdesk/rustdesk/releases/latest --jq .tag_name)
+          published=$(gh api repos/rustdesk/rustdesk/releases/latest --jq .published_at)
+          echo "Remotless is based on RustDesk $ours; latest RustDesk release is $latest ($published)."
+          advisories=$(gh api "repos/rustdesk/rustdesk/security-advisories?state=published&per_page=100" \
+            --jq "[.[] | select(.published_at > \"$(git log -1 --format=%cI -- REMOTLESS_UPSTREAM.txt)\")] | length" 2>/dev/null || echo 0)
+          status=0
+          if [ "$latest" != "$ours" ]; then
+            echo "::error title=New RustDesk release::RustDesk $latest is out (Remotless is on $ours). Merge it: https://github.com/rustdesk/rustdesk/releases/tag/$latest"
+            status=1
+          fi
+          if [ "${advisories:-0}" -gt 0 ]; then
+            echo "::error title=RustDesk security advisory::$advisories new security advisory(ies): https://github.com/rustdesk/rustdesk/security/advisories"
+            status=1
+          fi
+          [ $status = 0 ] && echo "Up to date."
+          exit $status
