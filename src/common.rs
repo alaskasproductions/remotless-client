@@ -2471,6 +2471,12 @@ pub fn create_symmetric_key_msg(their_pk_b: [u8; 32]) -> (Bytes, Bytes, secretbo
 
 #[inline]
 pub fn using_public_server() -> bool {
+    // Remotless: the built-in default server is our own (app.remotless.com), not RustDesk's free
+    // public one. Without this, the app showed RustDesk's "set up your own server" advert and capped
+    // image quality / hid FPS settings on relayed sessions (limits meant for RustDesk's free relay).
+    if is_custom_client() {
+        return false;
+    }
     crate::get_custom_rendezvous_server(get_option("custom-rendezvous-server")).is_empty()
 }
 
