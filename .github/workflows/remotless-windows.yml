@@ -143,9 +143,12 @@ jobs:
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
+          # The installer and the app expect the program to be named after the app (Remotless.exe),
+          # like RustDesk's own branded clients. librustdesk.dll keeps its name (loaded by name).
+          mv ./rustdesk/rustdesk.exe ./rustdesk/${BRAND}.exe
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/${BRAND}.exe
           popd
           mkdir -p ./out
           mv ./target/release/rustdesk-portable-packer.exe "./out/${BRAND}-${VERSION}-x86_64.exe"
