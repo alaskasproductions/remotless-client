@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:get/get.dart';
 
@@ -192,7 +193,11 @@ class UserModel {
   /// throw [RequestException]
   Future<LoginResponse> login(LoginRequest loginRequest) async {
     final url = await bind.mainGetApiServer();
+    // Remotless: prove this is the PC itself (needed to move a PC to another company).
+    final deviceKey =
+        bind.mainGetOptionSync(key: kOptionRemotlessDeviceToken).trim();
     final resp = await http.post(Uri.parse('$url/api/login'),
+        headers: deviceKey.isEmpty ? null : {'X-Remotless-Device': deviceKey},
         body: jsonEncode(loginRequest.toJson()));
 
     final Map<String, dynamic> body;
@@ -229,6 +234,12 @@ class UserModel {
         loginResponse.access_token != null;
     if (isLogInDone && loginResponse.user != null) {
       _parseAndUpdateUser(loginResponse.user!);
+    }
+    // Remotless: the server issues this PC a device key at login. It goes into the service-wide
+    // options so the background service sends it with status reports and connection logs.
+    final deviceToken = body['device_token'];
+    if (isLogInDone && deviceToken is String && deviceToken.isNotEmpty) {
+      bind.mainSetOption(key: kOptionRemotlessDeviceToken, value: deviceToken);
     }
 
     return loginResponse;

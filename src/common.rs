@@ -1312,6 +1312,19 @@ fn get_api_server_(api: String, custom: String) -> String {
     "https://app.remotless.com".to_owned()
 }
 
+/// Remotless: option holding this PC's device key, issued by app.remotless.com at app login.
+pub const OPTION_REMOTLESS_DEVICE_TOKEN: &str = "remotless-device-token";
+
+/// Remotless: `"X-Remotless-Device: <key>"` for heartbeat, sysinfo and audit posts, so the server can
+/// reject reports that don't come from this PC. Empty until someone logs in to the app here.
+pub fn remotless_device_header() -> String {
+    let token = Config::get_option(OPTION_REMOTLESS_DEVICE_TOKEN);
+    if token.is_empty() || token.contains(": ") {
+        return "".to_owned();
+    }
+    format!("X-Remotless-Device: {}", token)
+}
+
 #[inline]
 pub fn is_public(url: &str) -> bool {
     let parsed = url::Url::parse(url)
