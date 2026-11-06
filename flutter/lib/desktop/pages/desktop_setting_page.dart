@@ -2615,9 +2615,11 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('ID')}: $myId')
                       .marginSymmetric(vertical: 4.0)),
+              // Remotless: own links and company. The RustDesk credit, the AGPL-3.0 notice and the
+              // source-code link must stay (AGPL "Appropriate Legal Notices" and source offer).
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
+                    launchUrlString(kRemotlessPrivacyUrl);
                   },
                   child: Text(
                     translate('Privacy Statement'),
@@ -2625,14 +2627,22 @@ class _AboutState extends State<_About> {
                   ).marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com');
+                    launchUrlString(kRemotlessWebsite);
                   },
                   child: Text(
                     translate('Website'),
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
+              InkWell(
+                  onTap: () {
+                    launchUrlString(kRemotlessSourceUrl);
+                  },
+                  child: Text(
+                    'Source code (AGPL-3.0)',
+                    style: linkStyle,
+                  ).marginSymmetric(vertical: 4.0)),
               Container(
-                decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
+                decoration: const BoxDecoration(color: Color(0xFFE03A2F)),
                 padding:
                     const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
                 child: SelectionArea(
@@ -2643,15 +2653,23 @@ class _AboutState extends State<_About> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.\n$license',
-                            style: const TextStyle(color: Colors.white),
+                            'Copyright © ${DateTime.now().toString().substring(0, 4)} $kRemotlessCompany',
+                            style: const TextStyle(
+                                color: Colors.white, fontWeight: FontWeight.w600),
                           ),
                           Text(
-                            translate('Slogan_tip'),
+                            'Remote support you can trust.',
                             style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white),
-                          )
+                          ).marginOnly(top: 6),
+                          Text(
+                            'Based on RustDesk, Copyright © Purslane Tech Pte. Ltd., '
+                            'licensed under the GNU AGPL-3.0.${license.isEmpty ? '' : '\n$license'}',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white.withOpacity(0.8)),
+                          ).marginOnly(top: 12),
                         ],
                       ),
                     ),

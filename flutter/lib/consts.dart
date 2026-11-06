@@ -97,6 +97,13 @@ const String kOptionEnableLanDiscovery = "enable-lan-discovery";
 const String kOptionWhitelist = "whitelist";
 // Remotless: per-PC device key issued at app login (see src/common.rs remotless_device_header).
 const String kOptionRemotlessDeviceToken = "remotless-device-token";
+// Remotless: company and links shown in the app (About, installer, settings).
+const String kRemotlessCompany = "TKOCY LTD";
+const String kRemotlessWebsite = "https://remotless.com";
+const String kRemotlessPrivacyUrl = "https://remotless.com/privacy";
+const String kRemotlessTermsUrl = "https://remotless.com/terms";
+const String kRemotlessDownloadUrl = "https://app.remotless.com/download";
+const String kRemotlessSourceUrl = "https://github.com/alaskasproductions/remotless-client";
 const String kOptionIdWhitelist = "id-whitelist";
 const String kOptionEnableAbr = "enable-abr";
 const String kOptionEnableRecordSession = "enable-record-session";
