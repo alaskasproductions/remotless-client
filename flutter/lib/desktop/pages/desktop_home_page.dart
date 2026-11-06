@@ -428,6 +428,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards(String updateUrl) {
+    // Remotless: our own update notice. The button opens the Remotless download page; running
+    // the new file installs it over the current version.
+    if (bind.isCustomClient() && updateUrl.isNotEmpty && !isCardClosed) {
+      return buildInstallCard(
+          "Status",
+          "A new version of Remotless (${bind.mainGetNewVersion()}) is available.",
+          "Download update",
+          () async => await launchUrl(Uri.parse(updateUrl)),
+          closeButton: true);
+    }
     if (!bind.isCustomClient() &&
         updateUrl.isNotEmpty &&
         !isCardClosed &&

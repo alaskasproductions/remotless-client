@@ -1059,6 +1059,12 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 
 pub fn check_software_update() {
     if is_custom_client() {
+        // Remotless: our own update channel (RustDesk's checks api.rustdesk.com and only accepts
+        // RustDesk GitHub releases signed with RustDesk's key).
+        let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
+        if config::option2bool(keys::OPTION_ENABLE_CHECK_UPDATE, &opt) {
+            std::thread::spawn(move || allow_err!(remotless_check_update()));
+        }
         return;
     }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
@@ -1143,6 +1149,62 @@ pub(crate) fn display_version_from_release_id(release_id: &str) -> ResultType<St
         bail!("Release id has invalid display version: {}", release_id);
     }
     Ok(display_version.to_owned())
+}
+
+/// Remotless: asks the account server which app version is published for download
+/// (GET <api>/api/downloads) and, if it is newer, raises the same "new version" notice the UI
+/// already knows, pointing at <api>/download/v/<version> (redirects to the download page).
+#[tokio::main(flavor = "current_thread")]
+async fn remotless_check_update() -> ResultType<()> {
+    let api = get_api_server(
+        Config::get_option("api-server"),
+        Config::get_option("custom-rendezvous-server"),
+    );
+    if api.is_empty() {
+        return Ok(());
+    }
+    let resp = http_request_sync(
+        format!("{}/api/downloads", api),
+        "GET".to_owned(),
+        None,
+        "{}".to_owned(),
+    )
+    .await?;
+    let outer: Value = serde_json::from_str(&resp)?;
+    let body: Value = serde_json::from_str(outer["body"].as_str().unwrap_or("{}"))?;
+    let platform = if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "android") {
+        "android"
+    } else {
+        "linux"
+    };
+    let latest = body["downloads"][platform]["version"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    if latest.is_empty() || !latest.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        clear_software_update_url();
+        return Ok(());
+    }
+    if get_version_number(&latest) > get_version_number(crate::VERSION) {
+        let url = format!("{}/download/v/{}", api.trim_end_matches('/'), latest);
+        #[cfg(feature = "flutter")]
+        {
+            let mut m = HashMap::new();
+            m.insert("name", "check_software_update_finish");
+            m.insert("url", &url);
+            if let Ok(data) = serde_json::to_string(&m) {
+                let _ = crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, data);
+            }
+        }
+        *SOFTWARE_UPDATE_URL.lock().unwrap() = url;
+    } else {
+        clear_software_update_url();
+    }
+    Ok(())
 }
 
 fn clear_software_update_url() {
