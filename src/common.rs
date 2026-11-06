@@ -1308,7 +1308,8 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    "https://admin.rustdesk.com".to_owned()
+    // Remotless: default account/API server (login, address book, device heartbeat).
+    "https://app.remotless.com".to_owned()
 }
 
 #[inline]
