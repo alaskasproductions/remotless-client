@@ -263,6 +263,10 @@ pub async fn create_tcp_connection(
 /// Separate so it can be raced against the connection's eviction.
 async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()> {
     let (sk, pk) = Config::get_key_pair();
+    // Remotless: this PC only accepts sessions that are verified and encrypted end to end.
+    if crate::is_custom_client() && !(secure && pk.len() == sign::PUBLICKEYBYTES && sk.len() == sign::SECRETKEYBYTES) {
+        bail!("Refused an unencrypted connection request");
+    }
     if secure && pk.len() == sign::PUBLICKEYBYTES && sk.len() == sign::SECRETKEYBYTES {
         let mut sk_ = [0u8; sign::SECRETKEYBYTES];
         sk_[..].copy_from_slice(&sk);
@@ -334,11 +338,17 @@ async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()>
                         } else if pk.asymmetric_value.is_empty() {
                             Config::set_key_confirmed(false);
                             log::info!("Force to update pk");
+                            if crate::is_custom_client() {
+                                bail!("The connecting app could not verify this PC's key; refused (the key is being re-registered)");
+                            }
                         } else {
                             bail!("Handshake failed: invalid public sign key length from peer");
                         }
                     } else {
                         log::error!("Handshake failed: invalid message type");
+                        if crate::is_custom_client() {
+                            bail!("Handshake failed: no key exchange from the connecting app; refused rather than run unencrypted");
+                        }
                     }
                 } else {
                     bail!("Handshake failed: invalid message format");

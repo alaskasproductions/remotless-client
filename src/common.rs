@@ -1238,6 +1238,14 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    // Remotless: never contact RustDesk's update server (it would receive OS details and a hashed
+    // device fingerprint) and never install RustDesk's builds. Every caller ends here: the manual
+    // check, the background auto-updater (installed Windows service) and the macOS root updater.
+    // Our own update check is remotless_check_update().
+    if is_custom_client() {
+        clear_software_update_url();
+        bail!("RustDesk update channel is disabled in Remotless");
+    }
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
     let proxy_conf = Config::get_socks();

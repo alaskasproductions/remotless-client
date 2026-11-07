@@ -1672,6 +1672,9 @@ impl Client {
         // binding is possible at all; WebRTC then proceeds like TCP's non-secure fallback —
         // DTLS-encrypted but reported unsecured. TCP/UDP/relay keep their existing behavior.
         let is_webrtc = conn.is_webrtc();
+        // Remotless: every PC's key is signed by our own server, so a session that cannot be
+        // verified and encrypted is refused on every transport instead of running unencrypted.
+        let strict = is_webrtc || crate::is_custom_client();
         let mut sign_pk = None;
         let mut option_pk = None;
         if !signed_id_pk.is_empty() {
@@ -1690,6 +1693,9 @@ impl Client {
         let sign_pk = match sign_pk {
             Some(v) => v,
             None => {
+                if crate::is_custom_client() {
+                    bail!("Could not verify the other computer's identity, so the connection was refused rather than run unencrypted. Try again in a minute; if it keeps happening, restart Remotless on the other computer.");
+                }
                 // No trusted peer identity (key-less deployment, or a blob that does not verify
                 // under our root), so no fingerprint binding is possible. Fall through like TCP's
                 // non-secure path with is_secured() false: bailing would only move the session to
@@ -1748,15 +1754,15 @@ impl Client {
                                     },
                                 )?;
                             } else {
-                                if is_webrtc {
-                                    bail!("WebRTC handshake id mismatch (possible MITM)");
+                                if strict {
+                                    bail!("Handshake id mismatch (possible MITM): connection refused");
                                 }
                                 log::error!("Handshake failed: sign failure");
                                 conn.send(&Message::new()).await?;
                             }
                         } else {
-                            if is_webrtc {
-                                bail!("WebRTC peer identity could not be verified (refusing unbound channel)");
+                            if strict {
+                                bail!("The other computer's identity could not be verified: connection refused rather than run unencrypted");
                             }
                             // fall back to non-secure connection in case pk mismatch
                             log::info!("pk mismatch, fall back to non-secure");
@@ -1765,15 +1771,15 @@ impl Client {
                             conn.send(&msg_out).await?;
                         }
                     } else {
-                        if is_webrtc {
-                            bail!("WebRTC handshake received an unexpected message type");
+                        if strict {
+                            bail!("Handshake received an unexpected message type: connection refused");
                         }
                         log::error!("Handshake failed: invalid message type");
                         conn.send(&Message::new()).await?;
                     }
                 } else {
-                    if is_webrtc {
-                        bail!("WebRTC handshake received a malformed message");
+                    if strict {
+                        bail!("Handshake received a malformed message: connection refused");
                     }
                     log::error!("Handshake failed: invalid message format");
                     conn.send(&Message::new()).await?;
