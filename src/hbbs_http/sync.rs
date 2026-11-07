@@ -237,6 +237,8 @@ async fn start_hbbs_sync_async() {
                 v["id"] = json!(id);
                 v["uuid"] = json!(crate::encode64(hbb_common::get_uuid()));
                 v["ver"] = json!(hbb_common::get_version_number(crate::VERSION));
+                // Remotless: network cards, for Wake-on-LAN from anywhere (local addresses can change).
+                v["net"] = json!(crate::lan::remotless_lan_info());
                 if !conns.is_empty() {
                     v["conns"] = json!(conns);
                 }
@@ -252,6 +254,14 @@ async fn start_hbbs_sync_async() {
                             info_uploaded.uploaded = false;
                             config::Status::set("sysinfo_hash", "".to_owned());
                             log::info!("sysinfo required to forcely update");
+                        }
+                        // Remotless: wake other PCs of our company on this local network.
+                        if let Some(wol) = rsp.remove("wol") {
+                            if let Ok(macs) = serde_json::from_value::<Vec<String>>(wol) {
+                                if !macs.is_empty() {
+                                    std::thread::spawn(move || crate::lan::remotless_send_wol(macs));
+                                }
+                            }
                         }
                         if let Some(conns)  = rsp.remove("disconnect") {
                                 if let Ok(conns) = serde_json::from_value::<Vec<i32>>(conns) {

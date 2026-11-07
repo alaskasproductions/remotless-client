@@ -350,3 +350,56 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
     crate::flutter_ffi::main_load_lan_peers();
     Ok(())
 }
+
+// ---------- Remotless: Wake-on-LAN from anywhere ----------
+// Each PC tells our server its network cards (card address/MAC, local IPv4 and prefix). To wake a
+// sleeping PC, the server asks another online Remotless PC of the same company on the same local
+// network to send the magic packet, via that PC's heartbeat answer ("wol": [MAC, …]).
+
+/// This PC's private IPv4 network cards: [{"mac","ip","prefix"}], at most 8.
+#[cfg(not(target_os = "ios"))]
+pub fn remotless_lan_info() -> Vec<serde_json::Value> {
+    let mut out = vec![];
+    for interface in default_net::get_interfaces() {
+        let Some(mac) = interface.mac_addr else { continue };
+        let mac = mac.address();
+        if mac == "00:00:00:00:00:00" {
+            continue;
+        }
+        for v4 in &interface.ipv4 {
+            if v4.addr.is_loopback() || v4.addr.is_link_local() || !v4.addr.is_private() {
+                continue;
+            }
+            out.push(serde_json::json!({ "mac": mac, "ip": v4.addr.to_string(), "prefix": v4.prefix_len }));
+        }
+    }
+    out.truncate(8);
+    out
+}
+
+/// Send magic packets for the given MACs on every local IPv4 network (limited broadcast and the
+/// network's own broadcast address, three times each, since UDP can drop a packet).
+#[cfg(not(target_os = "ios"))]
+pub fn remotless_send_wol(macs: Vec<String>) {
+    let interfaces = default_net::get_interfaces();
+    for mac in macs.into_iter().take(20) {
+        let Ok(mac_addr) = mac.parse::<wol::MacAddr>() else {
+            log::warn!("Remotless wake-on-lan: invalid MAC {mac}");
+            continue;
+        };
+        for interface in &interfaces {
+            for v4 in &interface.ipv4 {
+                if v4.addr.is_loopback() || v4.addr.is_link_local() {
+                    continue;
+                }
+                let mask: u32 = if v4.prefix_len == 0 { 0 } else { u32::MAX << (32 - v4.prefix_len.min(32) as u32) };
+                let directed = Ipv4Addr::from(u32::from(v4.addr) | !mask);
+                for _ in 0..3 {
+                    allow_err!(wol::send_wol(mac_addr, None, Some(IpAddr::V4(v4.addr))));
+                    allow_err!(wol::send_wol(mac_addr, Some(IpAddr::V4(directed)), Some(IpAddr::V4(v4.addr))));
+                }
+            }
+        }
+        log::info!("Remotless wake-on-lan: magic packets sent for {mac}");
+    }
+}
