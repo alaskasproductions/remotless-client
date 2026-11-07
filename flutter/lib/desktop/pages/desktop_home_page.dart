@@ -416,6 +416,32 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               overflow: TextOverflow.clip,
               style: Theme.of(context).textTheme.bodySmall,
             ),
+          // Remotless: help links (Wake-on-LAN set-up and the help center).
+          if (!isOutgoingOnly && bind.isCustomClient())
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Wrap(
+                spacing: 12,
+                children: [
+                  InkWell(
+                    onTap: () => launchUrl(Uri.parse(kRemotlessWakeHelpUrl)),
+                    child: Text('Wake this PC from anywhere',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: MyTheme.accent,
+                            decoration: TextDecoration.underline)),
+                  ),
+                  InkWell(
+                    onTap: () => launchUrl(Uri.parse(kRemotlessHelpUrl)),
+                    child: Text('Help center',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: MyTheme.accent,
+                            decoration: TextDecoration.underline)),
+                  ),
+                ],
+              ),
+            ),
           if (isOutgoingOnly)
             Text(
               translate("outgoing_only_desk_tip"),

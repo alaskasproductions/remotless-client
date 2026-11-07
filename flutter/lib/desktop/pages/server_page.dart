@@ -16,7 +16,9 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'dart:convert';
 import '../../common.dart';
+import '../../utils/http_service.dart' as http;
 import '../../common/widgets/chat_page.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
@@ -500,6 +502,9 @@ class _CmHeaderState extends State<_CmHeader>
                     style: TextStyle(color: Colors.white, fontSize: 14),
                   ),
                 ),
+                // Remotless scam shield: who is this Remotless ID?
+                if (bind.isCustomClient())
+                  _RemotlessPeerBadge(peerId: client.peerId),
                 if (client.type_() == ClientType.terminal)
                   FittedBox(
                     child: Text(
@@ -1461,6 +1466,86 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                   : statusListView(jobTable);
             },
           )),
+    );
+  }
+}
+
+
+/// Remotless scam shield: asks our server whether the Remotless ID that is connecting belongs to a
+/// verified company, an unverified one, a blocked account, or nobody we know, and says so clearly
+/// in the accept window. Shows nothing if the server can't be reached.
+class _RemotlessPeerBadge extends StatefulWidget {
+  final String peerId;
+  const _RemotlessPeerBadge({Key? key, required this.peerId}) : super(key: key);
+  @override
+  State<_RemotlessPeerBadge> createState() => _RemotlessPeerBadgeState();
+}
+
+class _RemotlessPeerBadgeState extends State<_RemotlessPeerBadge> {
+  Map<String, dynamic>? _info;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final api = await bind.mainGetApiServer();
+      if (api.isEmpty) return;
+      final resp = await http.get(Uri.parse('$api/api/peer-check?id=${Uri.encodeComponent(widget.peerId)}'));
+      if (resp.statusCode != 200) return;
+      final data = jsonDecode(resp.body);
+      if (data is Map<String, dynamic> && mounted) setState(() => _info = data);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _info;
+    if (info == null) return const SizedBox.shrink();
+    final company = (info['company'] ?? '').toString();
+    late final IconData icon;
+    late final Color color;
+    late final String text;
+    switch (info['status']) {
+      case 'verified':
+        icon = Icons.verified;
+        color = const Color(0xff1f9d5c);
+        text = 'Verified company: $company';
+        break;
+      case 'company':
+        icon = Icons.info_outline;
+        color = const Color(0xffb7791f);
+        text = 'Company: $company (not verified by Remotless)';
+        break;
+      case 'blocked':
+        icon = Icons.block;
+        color = const Color(0xffc0392b);
+        text = 'Blocked for abuse. Do not accept.';
+        break;
+      default:
+        icon = Icons.warning_amber_rounded;
+        color = const Color(0xffc0392b);
+        text = 'Not a Remotless company account. Remotless never calls you. '
+            'Only accept if you asked this person for help.';
+    }
+    return Container(
+      margin: const EdgeInsets.only(top: 6, right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
     );
   }
 }

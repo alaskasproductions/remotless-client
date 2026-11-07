@@ -92,6 +92,7 @@ async fn start_hbbs_sync_async() {
     let mut last_sent: Option<Instant> = None;
     let mut info_uploaded = InfoUploaded::default();
     let mut sysinfo_ver = "".to_owned();
+    let mut support_claimed = false;
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -125,6 +126,27 @@ async fn start_hbbs_sync_async() {
                 // we may not be able to get the username before login after the next restart.
                 let mut v = crate::get_sysinfo();
                 let sys_username = v["username"].as_str().unwrap_or_default().to_string();
+                // Remotless support links: started from "Remotless-support-CODE.exe"? Tell the server
+                // our ID for that code once, so the technician sees that we are ready.
+                if !support_claimed {
+                    if let Some(code) = remotless_support_code() {
+                        let body = json!({
+                            "code": code,
+                            "id": id,
+                            "uuid": crate::encode64(hbb_common::get_uuid()),
+                            "hostname": v["hostname"].as_str().unwrap_or_default(),
+                        });
+                        match crate::post_request(url.replace("heartbeat", "support/claim"), body.to_string(), "").await {
+                            Ok(_) => {
+                                support_claimed = true;
+                                log::info!("Remotless support link {code}: reported this PC's ID");
+                            }
+                            Err(err) => log::warn!("Remotless support link claim failed: {err:?}"),
+                        }
+                    } else {
+                        support_claimed = true; // not started from a support download
+                    }
+                }
                 // Though the username comparison is only necessary on Windows,
                 // we still keep the comparison on other platforms for consistency.
                 let need_upload = (!info_uploaded.uploaded || info_uploaded.username.as_ref() != Some(&sys_username)) &&
@@ -289,6 +311,21 @@ async fn start_hbbs_sync_async() {
             }
         }
     }
+}
+
+/// Remotless: the support-link code in the name this app was started from
+/// ("Remotless-support-K7P2M9QX.exe", also "… (1).exe" after a repeated download). The portable
+/// launcher passes the original file name in RUSTDESK_APPNAME.
+#[cfg(not(target_os = "ios"))]
+fn remotless_support_code() -> Option<String> {
+    let name = std::env::var(crate::common::PORTABLE_APPNAME_RUNTIME_ENV_KEY)
+        .ok()
+        .or_else(|| std::env::current_exe().ok()?.file_name()?.to_str().map(|s| s.to_owned()))?;
+    let lower = name.to_lowercase();
+    let start = lower.find("support-")? + "support-".len();
+    let code: String = lower[start..].chars().take(8).collect::<String>().to_uppercase();
+    const ALPHABET: &str = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    (code.len() == 8 && code.chars().all(|c| ALPHABET.contains(c))).then_some(code)
 }
 
 fn heartbeat_url() -> String {
