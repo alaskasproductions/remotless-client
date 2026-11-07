@@ -1154,8 +1154,8 @@ pub(crate) fn display_version_from_release_id(release_id: &str) -> ResultType<St
 /// Remotless: asks the account server which app version is published for download
 /// (GET <api>/api/downloads) and, if it is newer, raises the same "new version" notice the UI
 /// already knows, pointing at <api>/download/v/<version> (redirects to the download page).
-#[tokio::main(flavor = "current_thread")]
-async fn remotless_check_update() -> ResultType<()> {
+/// Blocking: runs on its own thread (see check_software_update); http_request_sync has its own runtime.
+fn remotless_check_update() -> ResultType<()> {
     let api = get_api_server(
         Config::get_option("api-server"),
         Config::get_option("custom-rendezvous-server"),
@@ -1168,8 +1168,7 @@ async fn remotless_check_update() -> ResultType<()> {
         "GET".to_owned(),
         None,
         "{}".to_owned(),
-    )
-    .await?;
+    )?;
     let outer: Value = serde_json::from_str(&resp)?;
     let body: Value = serde_json::from_str(outer["body"].as_str().unwrap_or("{}"))?;
     let platform = if cfg!(windows) {
