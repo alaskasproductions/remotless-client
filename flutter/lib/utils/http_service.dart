@@ -58,28 +58,32 @@ class HttpService {
     dynamic body,
   }) async {
     final client = http.Client();
+    // Remotless: AI answers can take longer than other requests (see remotless_http_timeout in Rust).
+    final timeout = url.path.contains('/api/remotless/ai/')
+        ? const Duration(seconds: 90)
+        : _requestTimeout;
     try {
       var response = http.Response('', 400);
 
       switch (method) {
         case HttpMethod.get:
           response =
-              await client.get(url, headers: headers).timeout(_requestTimeout);
+              await client.get(url, headers: headers).timeout(timeout);
           break;
         case HttpMethod.post:
           response = await client
               .post(url, headers: headers, body: body)
-              .timeout(_requestTimeout);
+              .timeout(timeout);
           break;
         case HttpMethod.put:
           response = await client
               .put(url, headers: headers, body: body)
-              .timeout(_requestTimeout);
+              .timeout(timeout);
           break;
         case HttpMethod.delete:
           response = await client
               .delete(url, headers: headers, body: body)
-              .timeout(_requestTimeout);
+              .timeout(timeout);
           break;
         default:
           throw Exception('Unsupported HTTP method');

@@ -1964,7 +1964,7 @@ async fn get_http_response_async(
             http_client = http_client.body(b);
         }
         match http_client
-            .timeout(std::time::Duration::from_secs(12))
+            .timeout(remotless_http_timeout(url))
             .send()
             .await
         {
@@ -1984,7 +1984,7 @@ async fn get_http_response_async(
         }
 
         match http_client
-            .timeout(std::time::Duration::from_secs(12))
+            .timeout(remotless_http_timeout(url))
             .send()
             .await
         {
@@ -2038,6 +2038,16 @@ async fn get_http_response_async(
 
 /// Returns (status_code, json_string) so the caller can inspect the status
 /// without re-parsing the serialized JSON.
+/// Remotless: AI answers (the assistant, "Ask about this screen", summaries) take longer than the
+/// usual 12 s: the server waits for the AI provider, and a screenshot has to be uploaded first.
+fn remotless_http_timeout(url: &str) -> std::time::Duration {
+    if url.contains("/api/remotless/ai/") {
+        std::time::Duration::from_secs(90)
+    } else {
+        std::time::Duration::from_secs(12)
+    }
+}
+
 async fn http_request_http(
     url: &str,
     method: &str,

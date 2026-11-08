@@ -241,6 +241,21 @@ class UserModel {
     if (isLogInDone && deviceToken is String && deviceToken.isNotEmpty) {
       bind.mainSetOption(key: kOptionRemotlessDeviceToken, value: deviceToken);
     }
+    // Remotless: the server says why this PC was not added to the company (another company owns
+    // it, the company isn't verified yet, or the package's PC limit is reached). Shown once the
+    // login window has closed.
+    final notice = body['remotless_notice'];
+    if (isLogInDone && notice is String && notice.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        gFFI.dialogManager.show((setState, close, context) => CustomAlertDialog(
+              title: const Text('Remotless'),
+              content: SizedBox(width: 420, child: Text(notice)),
+              actions: [dialogButton('OK', onPressed: () => close())],
+              onSubmit: () => close(),
+              onCancel: () => close(),
+            ));
+      });
+    }
 
     return loginResponse;
   }

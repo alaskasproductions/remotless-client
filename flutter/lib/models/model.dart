@@ -4001,8 +4001,19 @@ class RecordingModel with ChangeNotifier {
   }
 
   updateStatus(bool status) {
+    final changed = status != _start;
     _start = status;
     notifyListeners();
+    // Remotless: the person on the other side is told in their chat window when recording
+    // starts and stops (RustDesk itself doesn't tell them).
+    final sessionId = parent.target?.sessionId;
+    if (changed && sessionId != null && !isIOS) {
+      bind.sessionSendChat(
+          sessionId: sessionId,
+          text: status
+              ? 'Your technician started recording this session.'
+              : 'Your technician stopped recording this session.');
+    }
   }
 }
 

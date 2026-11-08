@@ -524,8 +524,11 @@ class _GeneralState extends State<_General> {
   Widget other() {
     final incomingOnly = bind.isIncomingOnly();
     final outgoingOnly = bind.isOutgoingOnly();
-    final showAutoUpdate = (isWindows && bind.mainIsInstalled()) ||
-    (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false) && !bind.isCustomClient());
+    // Remotless: RustDesk's updater is switched off for our build (src/common.rs), so this box
+    // would do nothing; our own update notice is shown instead.
+    final showAutoUpdate = !bind.isCustomClient() &&
+        ((isWindows && bind.mainIsInstalled()) ||
+            (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false)));
     final children = <Widget>[
       if (!isWeb && !incomingOnly)
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
@@ -1040,7 +1043,8 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                 permissions(context),
                 password(context),
                 _Card(title: '2FA', children: [tfa()]),
-                if (!isChangeIdDisabled())
+                // Remotless: IDs are tied to company PCs, reports and Wake-on-LAN; not changeable.
+                if (!isChangeIdDisabled() && !bind.isCustomClient())
                   _Card(title: 'ID', children: [changeId()]),
                 more(context),
               ]),
