@@ -470,7 +470,12 @@ impl Client {
         let (peer, other_server, key, token) = if let Some((a, b, c)) = other_server.as_ref() {
             (a.as_ref(), b.as_ref(), c.as_ref(), "")
         } else {
-            (peer, "", key, token)
+            // Remotless: our ID server (open-source hbbs) ignores the account token and never
+            // starts the TCP key exchange that a token triggers (legacy_secure below), so with a
+            // logged-in app every connection waited 18 s and failed with "Failed to secure tcp:
+            // deadline has elapsed". Keep the token for our web API only; the session itself is
+            // still verified and encrypted end to end.
+            (peer, "", key, if crate::is_custom_client() { "" } else { token })
         };
         let (rendezvous_server, servers, contained) = if other_server.is_empty() {
             crate::get_rendezvous_server(1_000).await
