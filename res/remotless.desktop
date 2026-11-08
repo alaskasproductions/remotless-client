@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=Remotless
+GenericName=Remote Desktop
+Comment=Remotless remote desktop (based on RustDesk)
+Exec=remotless %u
+Icon=remotless
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=Network;RemoteAccess;GTK;
+Keywords=internet;remote-control;remote-support;remote-desktop;rdp;vnc;
+Actions=new-window;
+StartupWMClass=remotless
+
+[Desktop Action new-window]
+Name=Open a New Window
+Exec=remotless %u

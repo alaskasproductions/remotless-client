@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Remotless
+NoDisplay=true
+MimeType=x-scheme-handler/remotless;
+TryExec=remotless
+Exec=remotless %u
+Icon=remotless
+Terminal=false
+Type=Application
+StartupNotify=false
+StartupWMClass=remotless

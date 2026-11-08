@@ -1,0 +1,235 @@
+# Remotless: Linux x86_64 .deb (Ubuntu/Debian). Trimmed from flutter-build.yml (build-rustdesk-linux,
+# x86_64 only, no rpm/arch), keeping upstream's toolchain versions and its Ubuntu 18.04 build container
+# so the package also runs on older distributions (glibc 2.27+).
+# Produces Remotless-<version>-x86_64.deb: package `remotless`, installed in /usr/share/remotless,
+# /usr/bin/remotless, remotless.service, remotless.desktop (see build_remotless_flutter_deb in build.py).
+name: Remotless Linux build
+
+on:
+  workflow_dispatch:
+  # A new workflow can only be dispatched once it exists on the default branch, so pushes to the
+  # linux-build branch start it too.
+  push:
+    branches: [linux-build]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remotless-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN_VERSION: "1.75.0"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VERSION: "1.5.9"
+  BRAND: "Remotless"
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-linux:
+    name: Linux x86_64 deb
+    needs: [generate-bridge]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo apt-get update -y
+          sudo apt-get install -y nasm qemu-user-static
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Check Remotless branding and version
+        shell: bash
+        run: |
+          grep -q 'RwLock::new("Remotless"' libs/hbb_common/src/config.rs || { echo "hbb_common is not the Remotless fork"; exit 1; }
+          grep -q '"app.remotless.com"' libs/hbb_common/src/config.rs || { echo "default server not set"; exit 1; }
+          grep -q 'set(BINARY_NAME "remotless")' flutter/linux/CMakeLists.txt || { echo "Linux runner is not named remotless"; exit 1; }
+          cargo_version=$(grep -m1 '^version' Cargo.toml | sed 's/version *= *"\(.*\)"/\1/')
+          [ "$cargo_version" = "$VERSION" ] || { echo "VERSION $VERSION does not match Cargo.toml $cargo_version"; exit 1; }
+          grep -q "^version: ${VERSION}+" flutter/pubspec.yaml || { echo "VERSION $VERSION does not match flutter/pubspec.yaml"; exit 1; }
+
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@49819abfb41bd9b44fb781159c033dba90353a7c # v1.0
+        with:
+          swap-size-gb: 12
+
+      - name: Free Space
+        run: |
+          df -h
+          free -m
+
+      - name: Disable rust bridge build
+        run: |
+          # only build cdylib
+          sed -i  "s/\[\"cdylib\", \"staticlib\", \"rlib\"\]/\[\"cdylib\"\]/g" Cargo.toml
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          sudo apt install -y libva-dev && apt show libva-dev
+          # vcpkg fetches sources from GitHub, which sometimes answers 504 for a while: retry.
+          ok=0
+          for i in 1 2 3; do
+            if $VCPKG_ROOT/vcpkg install --triplet x64-linux --x-install-root="$VCPKG_ROOT/installed"; then ok=1; break; fi
+            echo "vcpkg install attempt $i failed"; sleep $((60 * i))
+          done
+          if [ "$ok" != 1 ]; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r f; do echo "$f:"; cat "$f"; done
+            exit 1
+          fi
+          head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-x64-linux-rel-out.log" || true
+
+      - uses: rustdesk-org/run-on-arch-action@d3fcfbb632b84cf7f6bc772bfaaa2c2f4f8789a8 # no release tag; commit 2026-05-26
+        name: Build Remotless (Ubuntu 18.04 container)
+        with:
+          arch: x86_64
+          distro: ubuntu18.04
+          setup: |
+            ls -l "${PWD}"
+            ls -l /opt/artifacts/vcpkg/installed
+          dockerRunArgs: |
+            --volume "${PWD}:/workspace"
+            --volume "/opt/artifacts:/opt/artifacts"
+          shell: /bin/bash
+          install: |
+            apt-get update -y
+            apt-get install -y \
+               build-essential \
+               clang \
+               cmake \
+               curl \
+               gcc \
+               git \
+               g++ \
+               libayatana-appindicator3-dev \
+               libasound2-dev \
+               libclang-10-dev \
+               libgstreamer1.0-dev \
+               libgstreamer-plugins-base1.0-dev \
+               libgtk-3-dev \
+               libpulse-dev \
+               libva-dev \
+               libxcb-randr0-dev \
+               libxcb-shape0-dev \
+               libxcb-xfixes0-dev \
+               libxdo-dev \
+               libxfixes-dev \
+               llvm-10-dev \
+               nasm \
+               ninja-build \
+               pkg-config \
+               tree \
+               python3 \
+               unzip \
+               wget \
+               xz-utils \
+               libssl-dev
+            # we have libopus compiled by us.
+            apt-get remove -y libopus-dev || true
+          run: |
+            set -e
+            RUST_TOOLCHAIN_VERSION="${{ env.RUST_TOOLCHAIN_VERSION }}"
+            FLUTTER_VERSION="${{ env.FLUTTER_VERSION }}"
+            git config --global --add safe.directory "*"
+            # Downloads can fail for a while (5xx): retry before failing the build.
+            fetch() {
+              for i in 1 2 3 4 5 6 7 8; do
+                if wget -q -O "$2" "$1"; then return 0; fi
+                echo "download attempt $i of $1 failed"; sleep $((30 * i))
+              done
+              echo "download failed after 8 attempts: $1"; return 1
+            }
+            # rust (no rustup: same as upstream)
+            pushd /opt
+            fetch https://static.rust-lang.org/dist/rust-${RUST_TOOLCHAIN_VERSION}-x86_64-unknown-linux-gnu.tar.gz rust.tar.gz
+            tar -zxf rust.tar.gz && rm rust.tar.gz
+            (cd rust-${RUST_TOOLCHAIN_VERSION}-x86_64-unknown-linux-gnu && ./install.sh > /dev/null)
+            rm -rf rust-${RUST_TOOLCHAIN_VERSION}-x86_64-unknown-linux-gnu
+            popd
+            cargo --version
+            # start build
+            pushd /workspace
+            export VCPKG_ROOT=/opt/artifacts/vcpkg
+            cargo build --locked --lib --features hwcodec,flutter,unix-file-copy-paste --release
+            rm -rf target/release/deps target/release/build
+            rm -rf ~/.cargo
+            popd
+
+            # Flutter
+            export PATH=/opt/flutter/bin:$PATH
+            pushd /opt
+            fetch https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz flutter.tar.xz
+            tar xf flutter.tar.xz && rm flutter.tar.xz
+            flutter doctor -v
+            pushd /opt/flutter
+            git apply /workspace/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+            popd
+            popd
+
+            # build flutter + deb
+            pushd /workspace
+            export CARGO_INCREMENTAL=0
+            export DEB_ARCH=amd64
+            python3 ./build.py --flutter --skip-cargo
+            ls -l *.deb
+
+      - name: Name and inspect the package
+        shell: bash
+        run: |
+          set -e
+          mkdir -p out
+          sudo mv "remotless-${VERSION}.deb" "out/${BRAND}-${VERSION}-x86_64.deb"
+          sudo chown -R "$(id -u):$(id -g)" out
+          deb="out/${BRAND}-${VERSION}-x86_64.deb"
+          echo "===== dpkg-deb -I ====="
+          dpkg-deb -I "$deb"
+          echo "===== dpkg-deb -c ====="
+          dpkg-deb -c "$deb" | tee contents.txt
+          sha256sum "$deb"
+          [ "$(dpkg-deb -f "$deb" Package)" = "remotless" ] || { echo "package is not named remotless"; exit 1; }
+          [ "$(dpkg-deb -f "$deb" Version)" = "$VERSION" ] || { echo "package version is not $VERSION"; exit 1; }
+          if grep -E '/usr/share/rustdesk|rustdesk\.service|rustdesk\.desktop|apps/rustdesk\.' contents.txt; then
+            echo "package still installs RustDesk paths"; exit 1
+          fi
+          grep -q '\./usr/share/remotless/remotless$' contents.txt || { echo "no /usr/share/remotless/remotless"; exit 1; }
+          grep -q 'remotless.service$' contents.txt || { echo "no remotless.service"; exit 1; }
+          echo "===== every file name still containing rustdesk ====="
+          grep -i rustdesk contents.txt || echo "(none)"
+
+      - name: Upload Remotless deb
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Remotless-linux-x64
+          path: out/*.deb
+          if-no-files-found: error

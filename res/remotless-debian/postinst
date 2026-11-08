@@ -1,0 +1,26 @@
+#!/bin/bash
+# Remotless deb: res/DEBIAN/postinst with our own names (/usr/share/remotless, remotless.service).
+
+set -e
+
+if [ "$1" = configure ]; then
+
+	INITSYS=$(ls -al /proc/1/exe | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
+	ln -f -s /usr/share/remotless/remotless /usr/bin/remotless
+
+	if [ "systemd" == "$INITSYS" ]; then
+
+		if [ -e /etc/systemd/system/remotless.service ]; then
+			rm -f /etc/systemd/system/remotless.service /usr/lib/systemd/system/remotless.service /usr/lib/systemd/user/remotless.service >/dev/null  2>&1
+		fi
+		mkdir -p /usr/lib/systemd/system/
+		cp /usr/share/remotless/files/systemd/remotless.service /usr/lib/systemd/system/remotless.service
+		# systemd wants an absolute ExecStop path (Ubuntu 18.04: "Executable path is not absolute").
+		if [ -e /usr/bin/pkill ]; then
+			sed -i "s|pkill|/usr/bin/pkill|g" /usr/lib/systemd/system/remotless.service
+		fi
+		systemctl daemon-reload
+		systemctl enable remotless
+		systemctl start remotless
+	fi
+fi

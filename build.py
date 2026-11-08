@@ -791,6 +791,72 @@ def build_flutter_deb(version, features):
     os.chdir("..")
 
 
+# ---------- Remotless: our own Debian package ----------
+# Package `remotless`, program /usr/share/remotless/remotless (+ /usr/bin/remotless symlink made by
+# postinst), unit remotless.service, desktop entries remotless.desktop / remotless-link.desktop and
+# icons named remotless, so it installs next to a real RustDesk package without touching its files.
+# The Rust side already derives these names from APP_NAME ("Remotless", lowercased on Linux);
+# the Flutter runner's BINARY_NAME is "remotless" (flutter/linux/CMakeLists.txt).
+LINUX_APP = 'remotless'
+
+
+def generate_remotless_control_file(version, path):
+    content = """Package: %s
+Section: net
+Priority: optional
+Version: %s
+Architecture: %s
+Maintainer: TKOCY LTD <info@remotless.com>
+Homepage: https://remotless.com
+Depends: libgtk-3-0t64 | libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2t64 | libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, gstreamer1.0-pipewire%s
+Recommends: libayatana-appindicator3-1
+Description: Remotless remote desktop (based on RustDesk)
+ Remote support and remote access for Remotless (https://remotless.com).
+ Based on RustDesk (https://github.com/rustdesk/rustdesk), licensed AGPL-3.0.
+""" % (LINUX_APP, version, get_deb_arch(), get_deb_extra_depends())
+    with open(path, 'w') as f:
+        f.write(content)
+
+
+def build_remotless_flutter_deb(version, features):
+    app = LINUX_APP
+    if not skip_cargo:
+        system2(f'cargo build --locked --features {features} --lib --release')
+        ffi_bindgen_function_refactor()
+    os.chdir('flutter')
+    system2('flutter build linux --release')
+    if not os.path.isfile(f'{flutter_build_dir}/{app}'):
+        raise Exception(f'{flutter_build_dir}/{app} not built: is BINARY_NAME "{app}" in flutter/linux/CMakeLists.txt?')
+    system2('/bin/rm -rf tmpdeb')
+    system2('mkdir -p tmpdeb/usr/bin/')
+    system2(f'mkdir -p tmpdeb/usr/share/{app}/files/systemd/')
+    system2('mkdir -p tmpdeb/usr/share/icons/hicolor/256x256/apps/')
+    system2('mkdir -p tmpdeb/usr/share/icons/hicolor/128x128/apps/')
+    system2('mkdir -p tmpdeb/usr/share/icons/hicolor/scalable/apps/')
+    system2('mkdir -p tmpdeb/usr/share/applications/')
+    system2(f'cp -r {flutter_build_dir}/* tmpdeb/usr/share/{app}/')
+    system2(f'cp ../res/{app}.service tmpdeb/usr/share/{app}/files/systemd/')
+    system2(f'cp ../res/128x128@2x.png tmpdeb/usr/share/icons/hicolor/256x256/apps/{app}.png')
+    system2(f'cp ../res/128x128.png tmpdeb/usr/share/icons/hicolor/128x128/apps/{app}.png')
+    system2(f'cp ../res/scalable.svg tmpdeb/usr/share/icons/hicolor/scalable/apps/{app}.svg')
+    system2(f'cp ../res/{app}.desktop tmpdeb/usr/share/applications/{app}.desktop')
+    system2(f'cp ../res/{app}-link.desktop tmpdeb/usr/share/applications/{app}-link.desktop')
+    system2('mkdir -p tmpdeb/DEBIAN')
+    system2('cp -a ../res/remotless-debian/* tmpdeb/DEBIAN/')
+    system2('chmod 0755 tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/prerm tmpdeb/DEBIAN/postrm')
+    generate_remotless_control_file(version, 'tmpdeb/DEBIAN/control')
+    md5_file_folder("tmpdeb/")
+    out = f'../{app}-{version}.deb'
+    system2(f'dpkg-deb --root-owner-group -b tmpdeb "{out}"' if _dpkg_deb_has_root_owner_group()
+            else f'dpkg-deb -b tmpdeb "{out}"')
+    system2('/bin/rm -rf tmpdeb/')
+    os.chdir("..")
+
+
+def _dpkg_deb_has_root_owner_group():
+    return os.system('dpkg-deb --help 2>/dev/null | grep -q -- --root-owner-group') == 0
+
+
 DRMTAP_DLOPEN_MARKER = b'/usr/lib/rustdesk/libdrmtap.so.0'
 # Present only when `drm-wake` is compiled in: the runtime option constant is itself
 # #[cfg(feature = "drm-wake")] (src/ipc/drm.rs). The dlopen marker above cannot stand in for it -
@@ -1104,7 +1170,12 @@ def main():
             else:
                 # system2(
                 #     'mv target/release/bundle/deb/rustdesk*.deb ./flutter/rustdesk.deb')
-                build_flutter_deb(version, features)
+                if args.drm:
+                    # Upstream's unattended-wayland variant, still packaged under RustDesk names.
+                    build_flutter_deb(version, features)
+                else:
+                    # Remotless: the regular deb is ours (package `remotless`, /usr/share/remotless).
+                    build_remotless_flutter_deb(version, features)
         else:
             system2('cargo --locked bundle --release --features ' + features)
             if osx:
