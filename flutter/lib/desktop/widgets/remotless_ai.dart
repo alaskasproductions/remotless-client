@@ -82,7 +82,8 @@ class RemotlessAi {
 // Toolbar button
 // ---------------------------------------------------------------------------
 
-/// Shown in the session toolbar when the logged-in company has the AI assistant switched on.
+/// Always shown in the session toolbar so technicians can find it; when the app is not logged in,
+/// the panel explains how to log in. Hidden only when the logged-in company has it switched off.
 class RemotlessAiButton extends StatefulWidget {
   final FFI ffi;
   final String peerId;
@@ -99,14 +100,17 @@ class RemotlessAiButton extends StatefulWidget {
 }
 
 class _RemotlessAiButtonState extends State<RemotlessAiButton> {
-  bool _on = false;
+  bool _on = true;
 
   @override
   void initState() {
     super.initState();
-    RemotlessAi.isOn('assistant').then((v) {
-      if (mounted && v) setState(() => _on = true);
-    });
+    if (RemotlessAi.loggedIn) {
+      // Only an explicit "off" from the server hides it (offline or errors keep it visible).
+      RemotlessAi.features().then((f) {
+        if (mounted && f['assistant'] == false) setState(() => _on = false);
+      });
+    }
   }
 
   @override
