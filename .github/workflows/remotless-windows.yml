@@ -76,7 +76,13 @@ jobs:
         run: |
           flutter doctor -v
           flutter precache --windows
-          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          # GitHub release downloads sometimes answer 504 for a while: retry before failing the build.
+          $ok = $false
+          for ($i = 1; $i -le 8 -and -not $ok; $i++) {
+            try { Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip; $ok = $true }
+            catch { Write-Host "engine download attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30 * $i) }
+          }
+          if (-not $ok) { throw "engine download failed after 8 attempts" }
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
           mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
 
@@ -120,7 +126,12 @@ jobs:
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
-          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          $ok = $false
+          for ($i = 1; $i -le 8 -and -not $ok; $i++) {
+            try { Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip; $ok = $true }
+            catch { Write-Host "usbmmidd download attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30 * $i) }
+          }
+          if (-not $ok) { throw "usbmmidd download failed after 8 attempts" }
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse
           Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
