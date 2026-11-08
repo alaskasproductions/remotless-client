@@ -19,6 +19,7 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'address_book.dart';
+import '../../desktop/widgets/remotless_ai.dart';
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -1635,6 +1636,12 @@ Future<bool> desktopTryShowTabAuditDialogCloseCancelled(
 //  false: go on
 Future<bool> showConnEndAuditDialogCloseCanceled(
     {required FFI ffi, String? type, String? title, String? text}) async {
+  if (type == null) {
+    // Remotless: the technician is ending the session; offer an AI summary (only when the
+    // company has it switched on and the app is logged in), and close the AI assistant panel.
+    if (!await remotlessAskSummaryBeforeClose(ffi, ffi.id)) return true;
+    RemotlessAiPanel.dispose(ffi);
+  }
   final res = await _showConnEndAuditDialogCloseCanceled(
       ffi: ffi, type: type, title: title, text: text);
   if (res == true) {

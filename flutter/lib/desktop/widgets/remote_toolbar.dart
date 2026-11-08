@@ -23,6 +23,7 @@ import '../../models/platform_model.dart';
 import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
+import './remotless_ai.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -847,6 +848,20 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
+    // Remotless: AI assistant panel (hidden unless logged in and switched on for the company).
+    if (!isWeb) {
+      toolbarItems.add(RemotlessAiButton(
+          ffi: widget.ffi,
+          peerId: widget.id,
+          builder: (onPressed) => _IconMenuButton(
+                icon: const Icon(Icons.auto_awesome,
+                    color: Colors.white, size: 18),
+                tooltip: 'AI assistant',
+                onPressed: onPressed,
+                color: const Color(0xff6d4bd8),
+                hoverColor: const Color(0xff8467e6),
+              )));
+    }
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }

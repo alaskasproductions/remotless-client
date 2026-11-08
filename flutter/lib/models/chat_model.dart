@@ -63,6 +63,8 @@ class ChatModel with ChangeNotifier {
 
   RxBool isWindowFocus = true.obs;
   BlockableOverlayState _blockableOverlayState = BlockableOverlayState();
+  // Remotless: the AI assistant panel uses the same overlay as the chat window.
+  BlockableOverlayState get blockableOverlayState => _blockableOverlayState;
   final Rx<VoiceCallStatus> _voiceCallStatus = Rx(VoiceCallStatus.notStarted);
   final RxBool _softKeyboardRequested = false.obs;
   bool _usingPhysicalChatInput = false;
