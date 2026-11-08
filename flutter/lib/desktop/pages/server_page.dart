@@ -1531,19 +1531,45 @@ class _RemotlessPeerBadgeState extends State<_RemotlessPeerBadge> {
         text = 'Not a Remotless company account. Remotless never calls you. '
             'Only accept if you asked this person for help.';
     }
+    // Scam shield 2.0: the server adds a risk level and plain reasons ("tried to reach 7 computers
+    // today"). Shown under the note when the risk is not low; older servers send none.
+    final reasons = (info['risk'] != null && info['risk'] != 'low' && info['reasons'] is List)
+        ? (info['reasons'] as List).map((e) => e.toString()).where((e) => e.isNotEmpty)
+            // the note above already says this for unknown IDs
+            .where((e) => !(info['status'] == 'unknown' && e.startsWith('Not a Remotless')))
+            .toList()
+        : <String>[];
+    final high = info['risk'] == 'high';
     return Container(
       margin: const EdgeInsets.only(top: 6, right: 6),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(text,
-                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(text,
+                    style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ],
           ),
+          if (high)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 22),
+              child: Text('High risk: this looks like a scam pattern.',
+                  style: TextStyle(color: const Color(0xffc0392b), fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+          for (final r in reasons.take(3))
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 22),
+              child: Text('• $r', style: const TextStyle(color: Color(0xff444444), fontSize: 11)),
+            ),
         ],
       ),
     );
