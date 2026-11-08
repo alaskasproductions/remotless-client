@@ -6,9 +6,11 @@
 // Only text the technician types is sent; a screen picture only via "Ask about this screen",
 // one at a time, after the technician confirms the person agreed (they also get a chat note). Needs the app login (company account);
 // the server is our account server: /api/remotless/ai/* (server/src/appapi.js).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +19,7 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../models/remotless_screenshot.dart';
+import '../../models/remotless_actions.dart';
 import '../../utils/http_service.dart' as http;
 
 const _aiColor = Color(0xff6d4bd8);
@@ -218,10 +221,24 @@ class _AiPanelState extends State<_AiPanel> {
   bool _askingScreen = false; // the consent box is open
   bool _agreed = false;
 
+  // "Let AI do it": the AI operates the remote PC step by step.
+  bool _actOn = false; // switched on for the company (needs Anthropic)
+  bool _actAsking = false; // consent box open
+  bool _actAgreed = false;
+  bool _actAskEach = true; // approve every step (default)
+  bool _actRunning = false;
+  bool _actStopped = false;
+  List<Map<String, dynamic>> _actNext = []; // actions waiting for approval
+  Completer<bool>? _actApproval;
+  int _actStep = 0;
+
   @override
   void initState() {
     RemotlessAi.isOn('screen').then((v) {
       if (mounted && v) setState(() => _screenOn = true);
+    });
+    RemotlessAi.isOn('act').then((v) {
+      if (mounted && v) setState(() => _actOn = true);
     });
     super.initState();
     _pos = widget.initialPosition;
@@ -368,25 +385,40 @@ class _AiPanelState extends State<_AiPanel> {
                       style: const TextStyle(color: Colors.red, fontSize: 12)),
                 ),
               if (RemotlessAi.loggedIn && _askingScreen) _consentBox(theme),
-              if (RemotlessAi.loggedIn) _inputRow(theme),
-              if (RemotlessAi.loggedIn && _screenOn && !_askingScreen)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 6),
-                    child: TextButton.icon(
-                      onPressed: _busy
-                          ? null
-                          : () => setState(() {
-                                _askingScreen = true;
-                                _agreed = false;
-                                _error = null;
-                              }),
-                      icon: const Icon(Icons.photo_camera_outlined, size: 16, color: _aiColor),
-                      label: const Text('Ask about this screen',
-                          style: TextStyle(color: _aiColor, fontSize: 12)),
-                    ),
-                  ),
+              if (RemotlessAi.loggedIn && _actAsking) _actConsentBox(theme),
+              if (_actRunning) _actControls(theme),
+              if (RemotlessAi.loggedIn && !_actRunning) _inputRow(theme),
+              if (RemotlessAi.loggedIn && (_screenOn || _actOn) && !_askingScreen && !_actAsking && !_actRunning)
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Wrap(children: [
+                    if (_screenOn)
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() {
+                                  _askingScreen = true;
+                                  _agreed = false;
+                                  _error = null;
+                                }),
+                        icon: const Icon(Icons.photo_camera_outlined, size: 16, color: _aiColor),
+                        label: const Text('Ask about this screen',
+                            style: TextStyle(color: _aiColor, fontSize: 12)),
+                      ),
+                    if (_actOn)
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() {
+                                  _actAsking = true;
+                                  _actAgreed = false;
+                                  _error = null;
+                                }),
+                        icon: const Icon(Icons.mouse_outlined, size: 16, color: _aiColor),
+                        label: const Text('Let AI do it',
+                            style: TextStyle(color: _aiColor, fontSize: 12)),
+                      ),
+                  ]),
                 ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -448,6 +480,253 @@ class _AiPanelState extends State<_AiPanel> {
       ),
     );
   }
+
+  // ---------------- "Let AI do it" ----------------
+
+  static Future<Size> _sizeOf(Uint8List png) async {
+    final codec = await ui.instantiateImageCodec(png);
+    final img = (await codec.getNextFrame()).image;
+    final s = Size(img.width.toDouble(), img.height.toDouble());
+    img.dispose();
+    return s;
+  }
+
+  static String _describe(Map<String, dynamic> a) {
+    final i = (a['input'] is Map) ? Map<String, dynamic>.from(a['input']) : <String, dynamic>{};
+    switch (a['name']) {
+      case 'left_click':
+        return 'Click';
+      case 'double_click':
+        return 'Double-click';
+      case 'triple_click':
+        return 'Triple-click';
+      case 'right_click':
+        return 'Right-click';
+      case 'middle_click':
+        return 'Middle-click';
+      case 'left_click_drag':
+        return 'Drag';
+      case 'mouse_move':
+        return 'Move the mouse';
+      case 'type':
+        final t = (i['text'] ?? '').toString();
+        return 'Type "${t.length > 60 ? '${t.substring(0, 60)}…' : t}"';
+      case 'key':
+        return 'Press ${i['text']}${(i['repeat'] ?? 1) != 1 ? ' ×${i['repeat']}' : ''}';
+      case 'scroll':
+        return 'Scroll ${i['scroll_direction'] ?? 'down'}';
+      case 'wait':
+        return 'Wait ${i['duration'] ?? 1} s';
+      case 'screenshot':
+        return 'Look at the screen';
+      default:
+        return a['name'].toString();
+    }
+  }
+
+  void _chatToCustomer(String text) {
+    try {
+      bind.sessionSendChat(sessionId: widget.ffi.sessionId, text: text);
+    } catch (_) {}
+  }
+
+  Future<void> _startAct() async {
+    final task = _input.text.trim();
+    if (task.length < 3) {
+      setState(() => _error = 'Type in the box what the AI should do, e.g. "Open the printer settings and print a test page".');
+      return;
+    }
+    if (!widget.ffi.inputModel.keyboardPerm) {
+      setState(() => _error = 'The other computer does not allow mouse and keyboard control in this session.');
+      return;
+    }
+    setState(() {
+      _actAsking = false;
+      _actRunning = true;
+      _actStopped = false;
+      _actStep = 0;
+      _actNext = [];
+      _error = null;
+      widget.history.add(_Msg('user', '🖱 $task'));
+      _input.clear();
+    });
+    _toBottom();
+    _chatToCustomer('Your technician started the Remotless AI assistant. It may move the mouse and type on your computer while your technician watches. Tell your technician if you want it to stop.');
+    String? runId;
+    try {
+      var png = await RemotlessScreenshot.take(widget.ffi);
+      var size = await _sizeOf(png);
+      var r = await RemotlessAi.post('act/start', {
+        'peer_id': widget.peerId,
+        'consent': true,
+        'task': task,
+        'image': {'mime': 'image/png', 'data': base64Encode(png)},
+      });
+      runId = r['runId']?.toString();
+      while (mounted && !_actStopped) {
+        final actions = (r['actions'] is List)
+            ? (r['actions'] as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList()
+            : <Map<String, dynamic>>[];
+        final note = (r['note'] ?? '').toString();
+        _actStep++;
+        if (r['done'] == true || actions.isEmpty) {
+          setState(() => widget.history.add(_Msg('assistant', note.isEmpty ? 'Done.' : note)));
+          break;
+        }
+        final steps = actions.map((a) => '• ${_describe(a)}').join('\n');
+        Offset? point;
+        final first = actions.first['input'];
+        if (first is Map && first['coordinate'] is List && size.width > 0) {
+          final c = first['coordinate'] as List;
+          point = Offset((c[0] as num).toDouble() / size.width, (c[1] as num).toDouble() / size.height);
+        }
+        setState(() {
+          widget.history.add(_Msg('assistant', '${note.isEmpty ? 'Next step:' : note}\n$steps',
+              image: point != null ? png : null, point: point));
+          _actNext = actions;
+        });
+        _toBottom();
+        if (_actAskEach) {
+          _actApproval = Completer<bool>();
+          setState(() {}); // show the Do it button
+          final go = await _actApproval!.future;
+          _actApproval = null;
+          if (!go || _actStopped) break;
+        } else {
+          await Future.delayed(const Duration(milliseconds: 1200)); // a moment to press Stop
+          if (_actStopped) break;
+        }
+        setState(() => _actNext = []);
+        final results = <Map<String, dynamic>>[];
+        for (final a in actions) {
+          if (_actStopped) break;
+          try {
+            await RemotlessActions.perform(widget.ffi, a['name'].toString(),
+                (a['input'] is Map) ? Map<String, dynamic>.from(a['input']) : {}, size);
+            results.add({'id': a['id'], 'ok': true});
+          } catch (e) {
+            results.add({'id': a['id'], 'ok': false, 'error': e.toString()});
+            break;
+          }
+        }
+        if (_actStopped) break;
+        await Future.delayed(const Duration(milliseconds: 900)); // let the screen update
+        png = await RemotlessScreenshot.take(widget.ffi);
+        size = await _sizeOf(png);
+        r = await RemotlessAi.post('act/step', {
+          'runId': runId,
+          'results': results,
+          'image': {'mime': 'image/png', 'data': base64Encode(png)},
+        });
+      }
+      if (_actStopped && mounted) {
+        setState(() => widget.history.add(_Msg('assistant', 'Stopped. Nothing more will be done.')));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (runId != null) {
+        RemotlessAi.post('act/stop', {'runId': runId}).catchError((_) => <String, dynamic>{});
+      }
+      _chatToCustomer('The Remotless AI assistant has stopped.');
+      if (mounted) {
+        setState(() {
+          _actRunning = false;
+          _actNext = [];
+        });
+        _toBottom();
+      }
+    }
+  }
+
+  void _stopAct() {
+    _actStopped = true;
+    final c = _actApproval;
+    if (c != null && !c.isCompleted) c.complete(false);
+    setState(() {});
+  }
+
+  /// Asked every time before the AI may operate the other computer.
+  Widget _actConsentBox(ThemeData theme) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _aiColor.withOpacity(0.08),
+          border: Border.all(color: _aiColor.withOpacity(0.4)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Let the AI use the mouse and keyboard on the other computer?',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+          const SizedBox(height: 4),
+          Text(
+              'Type the task in the box below first. The AI sees the screen, decides the next clicks and keys, and you watch. '
+              'It never types passwords or makes payments, and stops when something unexpected appears. The person gets a note in their chat.',
+              style: TextStyle(fontSize: 12, color: theme.hintColor, height: 1.35)),
+          Row(children: [
+            Checkbox(
+                value: _actAgreed,
+                activeColor: _aiColor,
+                onChanged: (v) => setState(() => _actAgreed = v ?? false)),
+            const Expanded(child: Text('The person I am helping agreed', style: TextStyle(fontSize: 12))),
+          ]),
+          Row(children: [
+            Checkbox(
+                value: _actAskEach,
+                activeColor: _aiColor,
+                onChanged: (v) => setState(() => _actAskEach = v ?? true)),
+            const Expanded(child: Text('Ask me before each step (recommended)', style: TextStyle(fontSize: 12))),
+          ]),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(onPressed: () => setState(() => _actAsking = false), child: const Text('Cancel')),
+            const SizedBox(width: 6),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: _aiColor, foregroundColor: Colors.white),
+              onPressed: _actAgreed ? _startAct : null,
+              icon: const Icon(Icons.mouse_outlined, size: 16),
+              label: const Text('Start'),
+            ),
+          ]),
+        ]),
+      );
+
+  /// While the AI is working: approve the next step, or stop.
+  Widget _actControls(ThemeData theme) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.06),
+          border: Border.all(color: Colors.red.withOpacity(0.35)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Text(
+              _actNext.isNotEmpty && _actAskEach
+                  ? 'Step $_actStep: check the plan above, then click Do it.'
+                  : 'The AI is working (step $_actStep)…',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+          if (_actNext.isNotEmpty && _actAskEach && _actApproval != null) ...[
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _aiColor, foregroundColor: Colors.white),
+              onPressed: () {
+                final c = _actApproval;
+                if (c != null && !c.isCompleted) c.complete(true);
+              },
+              child: const Text('Do it'),
+            ),
+            const SizedBox(width: 6),
+          ],
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: _stopAct,
+            icon: const Icon(Icons.stop, size: 16),
+            label: const Text('Stop'),
+          ),
+        ]),
+      );
 
   /// Asked every time before a picture of the remote screen is sent.
   Widget _consentBox(ThemeData theme) => Container(
