@@ -3,10 +3,12 @@
 //    the connected PC's basic facts (Windows version, CPU, memory) so answers fit that PC.
 //  - On disconnect, an optional AI summary of the session (with the technician's notes), saved with
 //    the session in the dashboard and added to the session report e-mail.
-// Only text the technician types is sent, never the screen. Needs the app login (company account);
+// Only text the technician types is sent; a screen picture only via "Ask about this screen",
+// one at a time, after the technician confirms the person agreed (they also get a chat note). Needs the app login (company account);
 // the server is our account server: /api/remotless/ai/* (server/src/appapi.js).
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +16,7 @@ import 'package:flutter/services.dart';
 import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import '../../models/remotless_screenshot.dart';
 import '../../utils/http_service.dart' as http;
 
 const _aiColor = Color(0xff6d4bd8);
@@ -128,7 +131,12 @@ class _RemotlessAiButtonState extends State<RemotlessAiButton> {
 class _Msg {
   final String role; // 'user' | 'assistant'
   final String content;
-  _Msg(this.role, this.content);
+  // "Ask about this screen": the picture that was sent and where the AI says to click (0..1).
+  final Uint8List? image;
+  final Offset? point;
+  final String? pointLabel;
+  _Msg(this.role, this.content, {this.image, this.point, this.pointLabel});
+  // Follow-up questions carry the text only; the picture is sent once.
   Map<String, String> toJson() => {'role': role, 'content': content};
 }
 
@@ -206,9 +214,15 @@ class _AiPanelState extends State<_AiPanel> {
   final _scroll = ScrollController();
   bool _busy = false;
   String? _error;
+  bool _screenOn = false; // the company has "Ask about this screen" switched on
+  bool _askingScreen = false; // the consent box is open
+  bool _agreed = false;
 
   @override
   void initState() {
+    RemotlessAi.isOn('screen').then((v) {
+      if (mounted && v) setState(() => _screenOn = true);
+    });
     super.initState();
     _pos = widget.initialPosition;
     WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
@@ -259,6 +273,60 @@ class _AiPanelState extends State<_AiPanel> {
     _focus.requestFocus();
   }
 
+  /// One picture of the remote screen + the question in the box, after the person agreed.
+  Future<void> _sendScreen() async {
+    if (_busy || !_agreed) return;
+    final question = _input.text.trim();
+    setState(() {
+      _askingScreen = false;
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final png = await RemotlessScreenshot.take(widget.ffi);
+      final shown = question.isEmpty
+          ? '📷 What is on this screen, and what should I do next?'
+          : '📷 $question';
+      setState(() {
+        widget.history.add(_Msg('user', shown, image: png));
+        _input.clear();
+      });
+      _toBottom();
+      final r = await RemotlessAi.post('screen', {
+        'peer_id': widget.peerId,
+        'consent': true,
+        'question': question,
+        'image': {'mime': 'image/png', 'data': base64Encode(png)},
+      });
+      // Tell the person on the other side, in their chat window, that a picture was sent.
+      bind.sessionSendChat(
+          sessionId: widget.ffi.sessionId,
+          text:
+              'Your technician sent one picture of your screen to the Remotless AI assistant to help solve the problem.');
+      final c = r['click'];
+      Offset? point;
+      if (c is Map && c['x'] is num && c['y'] is num) {
+        point = Offset((c['x'] as num).toDouble(), (c['y'] as num).toDouble());
+      }
+      widget.history.add(_Msg('assistant', (r['answer'] ?? '').toString(),
+          image: point != null ? png : null,
+          point: point,
+          pointLabel: c is Map ? c['label']?.toString() : null));
+    } catch (e) {
+      if (widget.history.isNotEmpty &&
+          widget.history.last.role == 'user' &&
+          widget.history.last.image != null) {
+        widget.history.removeLast();
+        _input.text = question;
+      }
+      _error = e.toString();
+    }
+    _agreed = false;
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _toBottom();
+  }
+
   void _toBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -299,11 +367,33 @@ class _AiPanelState extends State<_AiPanel> {
                   child: Text(_error!,
                       style: const TextStyle(color: Colors.red, fontSize: 12)),
                 ),
+              if (RemotlessAi.loggedIn && _askingScreen) _consentBox(theme),
               if (RemotlessAi.loggedIn) _inputRow(theme),
+              if (RemotlessAi.loggedIn && _screenOn && !_askingScreen)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: TextButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() {
+                                _askingScreen = true;
+                                _agreed = false;
+                                _error = null;
+                              }),
+                      icon: const Icon(Icons.photo_camera_outlined, size: 16, color: _aiColor),
+                      label: const Text('Ask about this screen',
+                          style: TextStyle(color: _aiColor, fontSize: 12)),
+                    ),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: Text(
-                  'Only what you type is sent, never the screen. Check commands before you run them.',
+                  _screenOn
+                      ? 'Only what you type is sent, and a screen picture only when you choose and the person agrees. Check commands before you run them.'
+                      : 'Only what you type is sent, never the screen. Check commands before you run them.',
                   style: TextStyle(
                       fontSize: 11, color: theme.hintColor, height: 1.3),
                 ),
@@ -358,6 +448,82 @@ class _AiPanelState extends State<_AiPanel> {
       ),
     );
   }
+
+  /// Asked every time before a picture of the remote screen is sent.
+  Widget _consentBox(ThemeData theme) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _aiColor.withOpacity(0.08),
+          border: Border.all(color: _aiColor.withOpacity(0.4)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Send one picture of the other computer\'s screen to the AI?',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+          const SizedBox(height: 4),
+          Text(
+              'The AI sees everything on that screen. Close emails, banking or private documents first. '
+              'Your question is the text in the box below (or leave it empty). The person will see a note in their chat.',
+              style: TextStyle(fontSize: 12, color: theme.hintColor, height: 1.35)),
+          Row(children: [
+            Checkbox(
+                value: _agreed,
+                activeColor: _aiColor,
+                onChanged: (v) => setState(() => _agreed = v ?? false)),
+            const Expanded(
+                child: Text('The person I am helping agreed',
+                    style: TextStyle(fontSize: 12))),
+          ]),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(
+                onPressed: () => setState(() => _askingScreen = false),
+                child: const Text('Cancel')),
+            const SizedBox(width: 6),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: _aiColor, foregroundColor: Colors.white),
+              onPressed: _agreed ? _sendScreen : null,
+              icon: const Icon(Icons.photo_camera_outlined, size: 16),
+              label: const Text('Send picture'),
+            ),
+          ]),
+        ]),
+      );
+
+  /// The picture the AI looked at, with a red ring where it says to click.
+  Widget _pictureWithPoint(_Msg m) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LayoutBuilder(builder: (context, c) {
+            return Stack(children: [
+              Image.memory(m.image!, width: c.maxWidth, fit: BoxFit.fitWidth),
+              if (m.point != null)
+                Positioned.fill(
+                  child: LayoutBuilder(builder: (context, box) {
+                    const r = 11.0;
+                    return Stack(children: [
+                      Positioned(
+                        left: m.point!.dx * box.maxWidth - r,
+                        top: m.point!.dy * box.maxHeight - r,
+                        child: Container(
+                          width: r * 2,
+                          height: r * 2,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.red, width: 3),
+                            color: Colors.red.withOpacity(0.15),
+                          ),
+                        ),
+                      ),
+                    ]);
+                  }),
+                ),
+            ]);
+          }),
+        ),
+      );
 
   Widget _notLoggedIn(ThemeData theme) => Padding(
         padding: const EdgeInsets.all(16),
@@ -418,7 +584,19 @@ class _AiPanelState extends State<_AiPanel> {
         ),
         child: mine
             ? SelectableText(m.content, style: const TextStyle(fontSize: 13))
-            : _AnswerText(m.content),
+            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _AnswerText(m.content),
+                if (m.image != null && m.point != null) ...[
+                  _pictureWithPoint(m),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                        '🔴 Click here${(m.pointLabel ?? '').isNotEmpty ? ': ${m.pointLabel}' : ''}',
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ]),
       ),
     );
   }
