@@ -23,6 +23,14 @@ const TIME_CONN: Duration = Duration::from_secs(3);
 lazy_static::lazy_static! {
     static ref SENDER : Mutex<broadcast::Sender<Vec<i32>>> = Mutex::new(start_hbbs_sync());
     static ref PRO: Arc<Mutex<bool>> = Default::default();
+    // Remotless: why the server ended a connection (shown to the person controlling this PC).
+    static ref DISCONNECT_REASONS: Mutex<HashMap<i32, String>> = Default::default();
+}
+
+/// Remotless: the reason the server gave for ending connection `id`, or the old default text.
+#[cfg(not(target_os = "ios"))]
+pub fn disconnect_reason(id: i32) -> String {
+    DISCONNECT_REASONS.lock().unwrap().remove(&id).unwrap_or_else(|| "Closed manually by web console".to_owned())
 }
 
 #[cfg(not(any(target_os = "ios")))]
@@ -282,6 +290,18 @@ async fn start_hbbs_sync_async() {
                             if let Ok(macs) = serde_json::from_value::<Vec<String>>(wol) {
                                 if !macs.is_empty() {
                                     std::thread::spawn(move || crate::lan::remotless_send_wol(macs));
+                                }
+                            }
+                        }
+                        // Remotless: reasons first, so the connection finds its reason when it closes.
+                        if let Some(reasons) = rsp.remove("disconnect_reasons") {
+                            if let Ok(reasons) = serde_json::from_value::<HashMap<String, String>>(reasons) {
+                                let mut map = DISCONNECT_REASONS.lock().unwrap();
+                                if map.len() > 200 { map.clear(); }
+                                for (id, text) in reasons {
+                                    if let Ok(id) = id.parse::<i32>() {
+                                        map.insert(id, text.chars().take(300).collect());
+                                    }
                                 }
                             }
                         }
