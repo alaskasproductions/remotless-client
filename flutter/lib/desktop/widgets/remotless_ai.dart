@@ -57,6 +57,21 @@ class RemotlessAi {
     }
   }
 
+  /// AI requests the company has used and has left this month: {used, limit, left (null = unlimited)}.
+  static Future<Map<String, dynamic>?> credits() async {
+    if (!loggedIn) return null;
+    try {
+      final api = await bind.mainGetApiServer();
+      if (api.isEmpty) return null;
+      final resp = await http.get(Uri.parse('$api/api/remotless/ai/credits'), headers: getHttpHeaders());
+      if (resp.statusCode != 200) return null;
+      final data = jsonDecode(resp.body);
+      return data is Map<String, dynamic> ? data : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> isOn(String feature) async =>
       (await features())[feature] == true;
 
@@ -231,12 +246,15 @@ class _AiPanelState extends State<_AiPanel> {
   List<Map<String, dynamic>> _actNext = []; // actions waiting for approval
   Completer<bool>? _actApproval;
   int _actStep = 0;
+  String? _credits; // "113 of 150 AI requests left this month"
+  bool _creditsLow = false;
 
   @override
   void initState() {
     RemotlessAi.isOn('screen').then((v) {
       if (mounted && v) setState(() => _screenOn = true);
     });
+    _loadCredits();
     RemotlessAi.isOn('act').then((v) {
       if (mounted && v) setState(() => _actOn = true);
     });
@@ -277,6 +295,7 @@ class _AiPanelState extends State<_AiPanel> {
         'messages': msgs.map((m) => m.toJson()).toList(),
       });
       widget.history.add(_Msg('assistant', (r['answer'] ?? '').toString()));
+      _loadCredits();
     } catch (e) {
       // Take the question back so it can be sent again.
       if (widget.history.isNotEmpty && widget.history.last.role == 'user') {
@@ -325,6 +344,7 @@ class _AiPanelState extends State<_AiPanel> {
       if (c is Map && c['x'] is num && c['y'] is num) {
         point = Offset((c['x'] as num).toDouble(), (c['y'] as num).toDouble());
       }
+      _loadCredits();
       widget.history.add(_Msg('assistant', (r['answer'] ?? '').toString(),
           image: point != null ? png : null,
           point: point,
@@ -342,6 +362,22 @@ class _AiPanelState extends State<_AiPanel> {
     if (!mounted) return;
     setState(() => _busy = false);
     _toBottom();
+  }
+
+  Future<void> _loadCredits() async {
+    final c = await RemotlessAi.credits();
+    if (!mounted || c == null) return;
+    final limit = (c['limit'] as num?)?.toInt() ?? -1;
+    final used = (c['used'] as num?)?.toInt() ?? 0;
+    final left = c['left'] == null ? null : (c['left'] as num).toInt();
+    setState(() {
+      _credits = limit == 0
+          ? 'AI is not part of your package'
+          : left == null
+              ? '$used AI requests used this month (unlimited)'
+              : '$left of $limit AI requests left this month';
+      _creditsLow = left != null && left <= (limit * 0.1).clamp(5, 1000000);
+    });
   }
 
   void _toBottom() {
@@ -453,12 +489,15 @@ class _AiPanelState extends State<_AiPanel> {
         child: Row(children: [
           const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
           const SizedBox(width: 8),
-          const Expanded(
-            child: Text('AI assistant',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14)),
+          Expanded(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('AI assistant',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+              if (_credits != null)
+                Text(_credits!,
+                    style: TextStyle(
+                        color: _creditsLow ? const Color(0xffffd0d0) : Colors.white70, fontSize: 10.5)),
+            ]),
           ),
           if (widget.history.isNotEmpty)
             TextButton(
@@ -629,6 +668,7 @@ class _AiPanelState extends State<_AiPanel> {
         RemotlessAi.post('act/stop', {'runId': runId}).catchError((_) => <String, dynamic>{});
       }
       _chatToCustomer('The Remotless AI assistant has stopped.');
+      _loadCredits();
       if (mounted) {
         setState(() {
           _actRunning = false;
