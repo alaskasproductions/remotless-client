@@ -1,6 +1,11 @@
 # Remotless: Windows x64 build. Trimmed from flutter-build.yml (build-for-windows-flutter, x86_64 only),
-# keeping upstream's exact toolchain versions. Produces an unsigned portable Remotless-<version>-x86_64.exe.
-# Run it from the Actions tab ("Run workflow"). Code signing gets added once a certificate is bought.
+# keeping upstream's exact toolchain versions. Produces a portable Remotless-<version>-x86_64.exe.
+# Run it from the Actions tab ("Run workflow").
+#
+# Code signing: Azure Artifact Signing (account remotless-signing, North Europe, publisher "TKOCY LTD").
+# Signing switches on by itself once the repo has the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID and
+# AZURE_CLIENT_SECRET (an Entra app registration with the "Artifact Signing Certificate Profile Signer"
+# role on the signing account). Without them the build still runs and uploads an unsigned exe.
 name: Remotless Windows build
 
 on:
@@ -17,6 +22,9 @@ env:
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VERSION: "1.6.1"
   BRAND: "Remotless"
+  SIGNING_ENDPOINT: "https://neu.codesigning.azure.net/"
+  SIGNING_ACCOUNT: "remotless-signing"
+  SIGNING_PROFILE: "remotless"
 
 jobs:
   generate-bridge:
@@ -35,6 +43,9 @@ jobs:
     name: Windows x64
     needs: [generate-bridge, build-topmost-window]
     runs-on: windows-2022
+    env:
+      # Secrets can't be used in step `if:` conditions, so turn "secret is set" into a plain flag.
+      SIGN: ${{ secrets.AZURE_CLIENT_ID != '' && 'true' || 'false' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -150,6 +161,27 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
+      # Sign the program files before they are packed: the packer unpacks them byte for byte,
+      # so the app and its DLLs keep their signatures when they run from the extracted folder.
+      - name: Sign program files
+        if: env.SIGN == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\rustdesk
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Remotless
+          description-url: https://remotless.com
+
       - name: Build single-file Remotless executable
         shell: bash
         run: |
@@ -163,11 +195,45 @@ jobs:
           popd
           mkdir -p ./out
           mv ./target/release/rustdesk-portable-packer.exe "./out/${BRAND}-${VERSION}-x86_64.exe"
-          sha256sum ./out/*.exe
 
-      - name: Upload Remotless executable (unsigned)
+      - name: Sign the download
+        if: env.SIGN == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\out
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Remotless
+          description-url: https://remotless.com
+
+      - name: Check signatures
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem ./out/*.exe) + @(Get-Item "./rustdesk/$env:BRAND.exe", "./rustdesk/librustdesk.dll")
+          $bad = $false
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($s.Status) - $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid' -or -not $s.TimeStamperCertificate) { $bad = $true }
+          }
+          if ($bad) { throw "a file is not signed and timestamped" }
+
+      - name: Show checksum
+        shell: bash
+        run: sha256sum ./out/*.exe
+
+      - name: Upload Remotless executable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Remotless-windows-x64-unsigned
+          name: Remotless-windows-x64-${{ env.SIGN == 'true' && 'signed' || 'unsigned' }}
           path: out/*.exe
           if-no-files-found: error
