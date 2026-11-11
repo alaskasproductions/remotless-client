@@ -98,8 +98,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId "com.carriez.flutter_hbb"
+        // Remotless: own application ID. The namespace stays com.carriez.flutter_hbb because the Rust JNI symbols use those class names.
+        applicationId "com.remotless.app"
         minSdkVersion 22
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
