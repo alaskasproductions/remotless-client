@@ -10,6 +10,9 @@ name: Remotless iOS build
 
 on:
   workflow_dispatch:
+  # Until the workflow is on master (needed for Run workflow), pushes to the ios-app branch build it.
+  push:
+    branches: [ios-app]
 
 permissions:
   contents: read
