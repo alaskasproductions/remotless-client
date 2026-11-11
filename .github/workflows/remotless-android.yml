@@ -232,20 +232,23 @@ jobs:
           mv ./flutter/build/app/outputs/flutter-apk/app-release.apk "out/${BRAND}-${VERSION}-android.apk"
           rm -f flutter/android/key.properties
 
-      - name: Check the APK
-        shell: bash
-        run: |
-          BT=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
-          AAPT=/usr/local/lib/android/sdk/build-tools/$BT/aapt
-          BADGING=$($AAPT dump badging out/*.apk)
-          CERTS=$(/usr/local/lib/android/sdk/build-tools/$BT/apksigner verify --print-certs out/*.apk)
-          echo "$BADGING" | grep -E "^package:|^application-label:"
-          echo "$CERTS" | grep -E "Signer #1 certificate (DN|SHA-256)"
-          [[ "$BADGING" == *"name='com.remotless.app'"* ]] || { echo "wrong application ID"; exit 1; }
-          sha256sum out/*.apk
-
       - name: Upload APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Remotless-android-${{ env.SIGN == 'true' && 'signed' || 'debug-signed' }}
           path: out/*.apk
+
+      - name: Check the APK
+        shell: bash
+        run: |
+          BT=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
+          BADGING=$(/usr/local/lib/android/sdk/build-tools/$BT/aapt dump badging out/*.apk)
+          CERTS=$(/usr/local/lib/android/sdk/build-tools/$BT/apksigner verify --print-certs out/*.apk)
+          echo "$BADGING" | grep -E "^package:|^application-label:" || true
+          echo "$CERTS"
+          sha256sum out/*.apk
+          [[ "$BADGING" == *"name='com.remotless.app'"* ]] || { echo "::error::wrong application ID"; exit 1; }
+          # SHA-256 of the Remotless release certificate (S:\Projectsemotless-client-keys).
+          if [ "$SIGN" = "true" ] && [[ "$CERTS" != *"0ec0594e2ed317a33087f7d0da365be24f8a29ed94b0d10a2c631ab9b2d09fe8"* ]]; then
+            echo "::error::APK is not signed with the Remotless release key"; exit 1
+          fi
