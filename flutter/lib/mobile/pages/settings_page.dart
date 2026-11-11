@@ -32,7 +32,9 @@ class SettingsPage extends StatefulWidget implements PageShape {
   final icon = Icon(Icons.settings);
 
   @override
-  final appBarActions = bind.isDisableSettings() ? [] : [ScanButton()];
+  // Remotless: no QR scan of server settings (the app is fixed to the Remotless server).
+  final appBarActions =
+      bind.isDisableSettings() || bind.isCustomClient() ? [] : [ScanButton()];
 
   @override
   State<SettingsPage> createState() => _SettingsState();
@@ -294,11 +296,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     final customClientSection = CustomSettingsSection(
         child: Column(
       children: [
-        if (bind.isCustomClient())
-          Align(
-            alignment: Alignment.center,
-            child: loadPowered(context),
-          ),
+        // Remotless: the RustDesk credit is in About (with the AGPL-3.0 notice), as on Windows.
         Align(
           alignment: Alignment.center,
           child: loadLogo(),
@@ -766,7 +764,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             ],
           ),
         SettingsSection(title: Text(translate("Settings")), tiles: [
-          if (!disabledSettings && !_hideNetwork && !_hideServer)
+          // Remotless: the server is fixed; changing it would cut the app off from Remotless.
+          if (!disabledSettings &&
+              !_hideNetwork &&
+              !_hideServer &&
+              !bind.isCustomClient())
             SettingsTile(
                 title: Text(translate('ID/Relay Server')),
                 leading: Icon(Icons.cloud),
@@ -783,7 +785,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 onPressed: (context) {
                   changeSocks5Proxy();
                 }),
-          if (isAndroid && !bind.isOutgoingOnly())
+          if (isAndroid && !bind.isOutgoingOnly() && !bind.isCustomClient())
             SettingsTile(
                 title: Text(translate('Deploy')),
                 leading: Icon(Icons.cloud_upload),
@@ -1101,7 +1103,27 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               onPressed: (context) =>
                   launchUrlString(kRemotlessPrivacyUrl),
               leading: Icon(Icons.privacy_tip),
-            )
+            ),
+            // Remotless: the RustDesk credit, the AGPL-3.0 notice and the source-code link must
+            // stay (AGPL "Appropriate Legal Notices" and source offer), as in the Windows About.
+            if (bind.isCustomClient())
+              SettingsTile(
+                title: const Text('Source code (AGPL-3.0)'),
+                onPressed: (context) => launchUrlString(kRemotlessSourceUrl),
+                leading: Icon(Icons.code),
+              ),
+            if (bind.isCustomClient())
+              SettingsTile(
+                title: Text('Copyright © ${DateTime.now().year} $kRemotlessCompany'),
+                value: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                      'Based on RustDesk, Copyright © Purslane Tech Pte. Ltd., '
+                      'licensed under the GNU AGPL-3.0.',
+                      style: TextStyle(fontSize: 12)),
+                ),
+                leading: Icon(Icons.copyright),
+              ),
           ],
         ),
       ],
