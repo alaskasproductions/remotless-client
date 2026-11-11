@@ -15,6 +15,7 @@ import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
 import '../../utils/android_documents.dart';
 import 'home_page.dart';
+import '../../common/widgets/remotless_peer_badge.dart';
 import '../remotless_pip.dart';
 
 class ServerPage extends StatefulWidget implements PageShape {
@@ -757,6 +758,12 @@ class ConnectionManager extends StatelessWidget {
                                       client.unreadChatMessageCount)))
                     ],
                   ),
+                  // Remotless scam shield: who is this Remotless ID? (same check as on Windows)
+                  if (bind.isCustomClient())
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: RemotlessPeerBadge(peerId: client.peerId),
+                    ).marginOnly(bottom: 8),
                   client.authorized
                       ? const SizedBox.shrink()
                       : Text(
