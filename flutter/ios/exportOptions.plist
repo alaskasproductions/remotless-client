@@ -5,11 +5,11 @@
  <key>method</key>
  <string>app-store</string>
  <key>teamID</key>
- <string>HZF9JMC8YN</string>
+ <string>APPLE_TEAM_ID</string>
  <key>provisioningProfiles</key>
  <dict>
- <key>com.carriez.flutterHbb</key>
- <string>rustdesk-ios-prod-app-store</string>
+ <key>com.remotless.app</key>
+ <string>remotless-ios-app-store</string>
  </dict>
  </dict>
  </plist>
