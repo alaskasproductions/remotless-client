@@ -25,6 +25,7 @@ import '../../models/shortcut_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
+import '../remotless_pip.dart';
 
 final initText = '1' * 1024;
 
@@ -105,6 +106,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   var _showEdit = false; // use soft keyboard
 
   Worker? _waylandKeyboardGateWorker;
+  Worker? _pipWorker; // Remotless: picture-in-picture
   bool _waylandKeyboardGateInitialized = false;
 
   InputModel get inputModel => gFFI.inputModel;
@@ -169,6 +171,11 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     });
     WidgetsBinding.instance.addObserver(this);
 
+    // Remotless: picture-in-picture. Dragging the PiP window away ends the session.
+    RemotlessPip.checkSupport();
+    RemotlessPip.onDismissed = () => closeConnection();
+    _pipWorker = ever(RemotlessPip.inPip, _onPipChanged);
+
     inputModel.keyboardInputAllowed = true;
 
     // Wayland sessions may use clipboard-based text input on the controlled side.
@@ -188,6 +195,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Future<void> dispose() async {
     HardwareKeyboard.instance.removeHandler(_handleLocalKeyEvent);
     WidgetsBinding.instance.removeObserver(this);
+    _pipWorker?.dispose();
+    RemotlessPip.onDismissed = null;
+    unawaited(RemotlessPip.configure(enabled: false));
     // Close the session up-front. `gFFI.close()` below only calls `sessionClose`
     // after several awaits (canvas save, image update, the `enable_soft_keyboard`
     // platform call), so if the app is backgrounded while this page is disposing,
@@ -488,8 +498,69 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           ? getBottomAppBar()
           : Offstage());
 
+  // Remotless: keep MainActivity's PiP aspect ratio in step with the remote screen.
+  void _updatePip() {
+    if (!isAndroid || !mounted) return;
+    final rect = gFFI.ffiModel.displaysRect();
+    if (gFFI.ffiModel.pi.isSet.isFalse || rect == null) return;
+    final w = rect.width.round(), h = rect.height.round();
+    if (w <= 0 || h <= 0) return;
+    RemotlessPip.configure(enabled: true, width: w, height: h);
+  }
+
+  void _onPipChanged(bool inPip) {
+    if (!mounted) return;
+    if (inPip) {
+      // Only the remote picture is shown in the small window.
+      _showEdit = false;
+      gFFI.invokeMethod("enable_soft_keyboard", false);
+      _mobileFocusNode.unfocus();
+      gFFI.dialogManager.hideMobileActionsOverlay(store: false);
+      gFFI.chatModel.hideChatOverlay();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        gFFI.canvasModel.updateViewStyle();
+        gFFI.ffiModel.tryShowAndroidActionsOverlay();
+      });
+    }
+    setState(() {});
+  }
+
+  Future<void> _minimise() async {
+    _updatePip();
+    if (!await RemotlessPip.enter()) {
+      showToast(translate('Picture-in-picture is turned off for Remotless on this phone'));
+    }
+  }
+
+  Widget _pipBody() => Container(
+        color: Colors.black,
+        child: Consumer<ImageModel>(
+          builder: (_, m, __) => m.image == null
+              ? const SizedBox.expand()
+              : SizedBox.expand(
+                  child: RawImage(
+                      image: m.image,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium)),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    if (isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updatePip());
+    }
+    // In PiP the normal page stays mounted (offstage) so nothing is torn down.
+    return Obx(() => Stack(children: [
+          Offstage(
+              offstage: RemotlessPip.inPip.value, child: _buildSessionPage()),
+          if (RemotlessPip.inPip.value) Positioned.fill(child: _pipBody()),
+        ]));
+  }
+
+  Widget _buildSessionPage() {
     final keyboardIsVisible =
         keyboardVisibilityController.isVisible && _showEdit;
     final showActionButton = !_showBar || keyboardIsVisible || _showGestureHelp;
@@ -677,6 +748,16 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                             : onPressedTextChat(widget.id),
                                   ))
                         ]) +
+                  (isAndroid && RemotlessPip.supported.value
+                      ? <Widget>[
+                          IconButton(
+                            color: Colors.white,
+                            tooltip: translate('Minimise'),
+                            icon: Icon(Icons.picture_in_picture_alt),
+                            onPressed: _minimise,
+                          )
+                        ]
+                      : <Widget>[]) +
                   [
                     IconButton(
                       color: Colors.white,
