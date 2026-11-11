@@ -10,6 +10,13 @@ package com.carriez.flutter_hbb
 import ffi.FFI
 
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Handler
+import android.os.Looper
+import android.util.Rational
+import androidx.lifecycle.Lifecycle
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -674,6 +681,22 @@ class MainActivity : FlutterActivity() {
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
                 }
+                // Remotless: picture-in-picture viewer (the phone controlling a PC).
+                "is_pip_supported" -> {
+                    result.success(pipSupported())
+                }
+                "set_pip" -> {
+                    val args = call.arguments as? Map<*, *>
+                    pipEnabled = args?.get("enabled") == true
+                    val w = (args?.get("w") as? Number)?.toInt() ?: 0
+                    val h = (args?.get("h") as? Number)?.toInt() ?: 0
+                    if (w > 0 && h > 0) pipAspect = clampPipAspect(w, h)
+                    updatePipParams()
+                    result.success(true)
+                }
+                "enter_pip" -> {
+                    result.success(enterPip())
+                }
                 else -> {
                     result.error("-1", "No such method", null)
                 }
@@ -1020,6 +1043,100 @@ class MainActivity : FlutterActivity() {
         } else {
             Log.d(logTag, "onVoiceCallClosed success")
         }
+    }
+
+    // ---- Remotless: picture-in-picture viewer -------------------------------------------------
+    // While a remote session is open, Flutter enables PiP with the remote screen's aspect ratio.
+    // Home (or the Minimise button) shrinks the session into a floating window that keeps it
+    // running; tapping it brings the full view back; dragging it away ends the session.
+    private var pipEnabled = false
+    private var pipAspect = Rational(16, 9)
+    private var pipDismissSent = false
+    private val pipHandler = Handler(Looper.getMainLooper())
+
+    private fun pipSupported(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    // Android only accepts aspect ratios between 1:2.39 and 2.39:1.
+    private fun clampPipAspect(w: Int, h: Int): Rational {
+        val r = w.toDouble() / h.toDouble()
+        return when {
+            r > 2.39 -> Rational(239, 100)
+            r < 1 / 2.39 -> Rational(100, 239)
+            else -> Rational(w, h)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun buildPipParams(): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder().setAspectRatio(pipAspect)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+: the swipe-home gesture goes straight into PiP.
+            builder.setAutoEnterEnabled(pipEnabled)
+            builder.setSeamlessResizeEnabled(false)
+        }
+        return builder.build()
+    }
+
+    private fun updatePipParams() {
+        if (!pipSupported()) return
+        try {
+            setPictureInPictureParams(buildPipParams())
+        } catch (e: Exception) {
+            Log.w(logTag, "setPictureInPictureParams failed: ${e.message}")
+        }
+    }
+
+    private fun enterPip(): Boolean {
+        if (!pipSupported() || !pipEnabled) return false
+        return try {
+            pipDismissSent = false
+            enterPictureInPictureMode(buildPipParams())
+        } catch (e: Exception) {
+            Log.w(logTag, "enterPictureInPictureMode failed: ${e.message}")
+            false
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 8-11 have no auto-enter, so go into PiP when the user leaves with Home.
+        if (pipEnabled && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            enterPip()
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        flutterMethodChannel?.invokeMethod(
+            "on_pip_changed", mapOf("in_pip" to isInPictureInPictureMode)
+        )
+        if (isInPictureInPictureMode) {
+            pipDismissSent = false
+            return
+        }
+        // Leaving PiP: "expand" resumes the activity; dragging the window away / closing it
+        // leaves the activity stopped. Depending on the Android version onStop comes just before
+        // or just after this call, so check now and once more a moment later.
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            sendPipDismissed()
+        } else {
+            pipHandler.postDelayed({
+                if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    sendPipDismissed()
+                }
+            }, 500)
+        }
+    }
+
+    private fun sendPipDismissed() {
+        if (pipDismissSent) return
+        pipDismissSent = true
+        flutterMethodChannel?.invokeMethod("on_pip_dismissed", null)
     }
 
     override fun onStop() {

@@ -15,6 +15,7 @@ import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
 import '../../utils/android_documents.dart';
 import 'home_page.dart';
+import '../remotless_pip.dart';
 
 class ServerPage extends StatefulWidget implements PageShape {
   @override
@@ -948,6 +949,7 @@ void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
     debugPrint("flutter got android msg,$method,$arguments");
     try {
+      if (RemotlessPip.handleAndroidMessage(method, arguments)) return "";
       switch (method) {
         case "start_capture":
           {
