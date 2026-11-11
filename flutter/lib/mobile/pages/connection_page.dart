@@ -17,6 +17,7 @@ import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'home_page.dart';
+import '../../common/widgets/login.dart';
 
 /// Connection page for connecting to a remote peer.
 class ConnectionPage extends StatefulWidget implements PageShape {
@@ -87,6 +88,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
           if (!bind.isCustomClient() && !isIOS)
             Obx(() => _buildUpdateUI(stateGlobal.updateUrl.value)),
           _buildRemoteIDTextField(),
+          if (!bind.isDisableAccount()) _buildRemotlessSignIn(),
         ])),
         SliverFillRemaining(
           hasScrollBody: true,
@@ -94,6 +96,34 @@ class _ConnectionPageState extends State<ConnectionPage> {
         )
       ],
     ).marginOnly(top: 2, left: 10, right: 10);
+  }
+
+  // Remotless: while signed out, offer sign-in here (Settings > Account has it too). Signing in
+  // shows the company's computers in the tabs below.
+  Widget _buildRemotlessSignIn() {
+    return Obx(() {
+      if (gFFI.userModel.userName.value.isNotEmpty) return const SizedBox.shrink();
+      return Card(
+        margin: const EdgeInsets.only(top: 8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+          child: Row(children: [
+            const Icon(Icons.account_circle_outlined, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                translate('Sign in to your Remotless account to see your company's computers.'),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            TextButton(
+              onPressed: () => loginDialog(),
+              child: Text(translate('Sign in')),
+            ),
+          ]),
+        ),
+      );
+    });
   }
 
   /// Callback for the connect button.
