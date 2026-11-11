@@ -112,7 +112,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                translate('Sign in to your Remotless account to see your company's computers.'),
+                translate("Sign in to your Remotless account to see your company's computers."),
                 style: const TextStyle(fontSize: 13),
               ),
             ),
