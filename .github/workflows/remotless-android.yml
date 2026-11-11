@@ -4,7 +4,7 @@
 # Run it from the Actions tab ("Run workflow").
 #
 # Signing: the APK is signed with the Remotless release key when the repo has the secrets
-# ANDROID_SIGNING_KEY (base64 of the .jks), ANDROID_ALIAS, ANDROID_KEY_STORE_PASSWORD and ANDROID_KEY_PASSWORD.
+# ANDROID_SIGNING_KEY (base64 of the .jks), ANDROID_KEY_STORE_PASSWORD and ANDROID_KEY_PASSWORD (key alias: remotless).
 # Never change that key: Android refuses updates signed with a different one. Without the secrets the build
 # uses the debug key, which is only good for testing.
 name: Remotless Android build
@@ -201,7 +201,7 @@ jobs:
         shell: bash
         env:
           KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY }}
-          KEY_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          KEY_ALIAS: remotless
           STORE_PASS: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
@@ -237,9 +237,11 @@ jobs:
         run: |
           BT=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
           AAPT=/usr/local/lib/android/sdk/build-tools/$BT/aapt
-          $AAPT dump badging out/*.apk | grep -E "^package:|^application-label:"
-          $AAPT dump badging out/*.apk | grep -q "name='com.remotless.app'" || { echo "wrong application ID"; exit 1; }
-          /usr/local/lib/android/sdk/build-tools/$BT/apksigner verify --print-certs out/*.apk | grep -E "Signer #1 certificate (DN|SHA-256)"
+          BADGING=$($AAPT dump badging out/*.apk)
+          CERTS=$(/usr/local/lib/android/sdk/build-tools/$BT/apksigner verify --print-certs out/*.apk)
+          echo "$BADGING" | grep -E "^package:|^application-label:"
+          echo "$CERTS" | grep -E "Signer #1 certificate (DN|SHA-256)"
+          [[ "$BADGING" == *"name='com.remotless.app'"* ]] || { echo "wrong application ID"; exit 1; }
           sha256sum out/*.apk
 
       - name: Upload APK
