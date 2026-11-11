@@ -248,7 +248,7 @@ jobs:
           echo "$CERTS"
           sha256sum out/*.apk
           [[ "$BADGING" == *"name='com.remotless.app'"* ]] || { echo "::error::wrong application ID"; exit 1; }
-          # SHA-256 of the Remotless release certificate (S:\Projectsemotless-client-keys).
+          # SHA-256 of the Remotless release certificate (keystore in remotless-client-keys on the S: drive).
           if [ "$SIGN" = "true" ] && [[ "$CERTS" != *"0ec0594e2ed317a33087f7d0da365be24f8a29ed94b0d10a2c631ab9b2d09fe8"* ]]; then
             echo "::error::APK is not signed with the Remotless release key"; exit 1
           fi
