@@ -3072,7 +3072,7 @@ pub mod server_side {
     use jni::{
         errors::{Error as JniError, Result as JniResult},
         objects::{JClass, JObject, JString},
-        sys::{jboolean, jstring},
+        sys::{jboolean, jint, jstring},
         JNIEnv,
     };
 
@@ -3177,6 +3177,19 @@ pub mod server_side {
             "".into()
         };
         return env.new_string(res).unwrap_or_default().into_raw();
+    }
+
+    /// Remotless: JSON list of the people connected to this phone (for the floating bubble).
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_getClientsState(env: JNIEnv, _class: JClass) -> jstring {
+        let res = crate::ui_cm_interface::get_clients_state();
+        env.new_string(res).unwrap_or_default().into_raw()
+    }
+
+    /// Remotless: end one incoming connection (End session in the floating bubble).
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_closeConnection(_env: JNIEnv, _class: JClass, id: jint) {
+        crate::ui_cm_interface::close(id);
     }
 
     #[no_mangle]

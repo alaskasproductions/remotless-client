@@ -28,4 +28,7 @@ object FFI {
     external fun getBuildinOption(key: String): String
     external fun onClipboardUpdate(clips: ByteBuffer)
     external fun isServiceClipboardEnabled(): Boolean
+    // Remotless: floating bubble (who is connected, End session)
+    external fun getClientsState(): String
+    external fun closeConnection(id: Int)
 }

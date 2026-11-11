@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -27,6 +29,7 @@ import android.widget.ImageView
 import android.widget.PopupMenu
 import com.caverock.androidsvg.SVG
 import ffi.FFI
+import org.json.JSONArray
 import kotlin.math.abs
 
 class FloatingWindowService : Service(), View.OnTouchListener {
@@ -35,6 +38,10 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     private lateinit var layoutParams: WindowManager.LayoutParams
     private lateinit var floatingView: ImageView
     private lateinit var originalDrawable: Drawable
+    // Remotless: the bubble's base picture; a green ring is added while someone is connected.
+    private lateinit var baseDrawable: Drawable
+    private var live = false
+    private var onLeftSide = true
     private lateinit var leftHalfDrawable: Drawable
     private lateinit var rightHalfDrawable: Drawable
 
@@ -114,35 +121,9 @@ class FloatingWindowService : Service(), View.OnTouchListener {
                 e.printStackTrace()
             }
         }
-        val originalBitmap = Bitmap.createBitmap(
-            originalDrawable.intrinsicWidth,
-            originalDrawable.intrinsicHeight,
-            Bitmap.Config.ARGB_8888
-        )
-        val canvas = Canvas(originalBitmap)
-        originalDrawable.setBounds(
-            0,
-            0,
-            originalDrawable.intrinsicWidth,
-            originalDrawable.intrinsicHeight
-        )
-        originalDrawable.draw(canvas)
-        val leftHalfBitmap = Bitmap.createBitmap(
-            originalBitmap,
-            0,
-            0,
-            originalDrawable.intrinsicWidth / 2,
-            originalDrawable.intrinsicHeight
-        )
-        val rightHalfBitmap = Bitmap.createBitmap(
-            originalBitmap,
-            originalDrawable.intrinsicWidth / 2,
-            0,
-            originalDrawable.intrinsicWidth / 2,
-            originalDrawable.intrinsicHeight
-        )
-        leftHalfDrawable = BitmapDrawable(resources, leftHalfBitmap)
-        rightHalfDrawable = BitmapDrawable(resources, rightHalfBitmap)
+        baseDrawable = originalDrawable
+        live = activeClients().isNotEmpty()
+        buildDrawables()
 
         floatingView.setImageDrawable(rightHalfDrawable)
         floatingView.setOnTouchListener(this)
@@ -175,6 +156,43 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
         windowManager.addView(floatingView, layoutParams)
         moveToScreenSide()
+    }
+
+    // Remotless: renders the full, left-half and right-half bubble pictures, with a green ring
+    // around the logo while someone is connected (both halves show part of the ring).
+    private fun buildDrawables() {
+        val w = baseDrawable.intrinsicWidth
+        val h = baseDrawable.intrinsicHeight
+        val originalBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(originalBitmap)
+        baseDrawable.setBounds(0, 0, w, h)
+        baseDrawable.draw(canvas)
+        if (live) {
+            val stroke = w * 0.09f
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = stroke
+                color = Color.parseColor("#22C55E")
+            }
+            canvas.drawCircle(w / 2f, h / 2f, w / 2f - stroke / 2f, paint)
+        }
+        originalDrawable = BitmapDrawable(resources, originalBitmap)
+        val leftHalfBitmap = Bitmap.createBitmap(
+            originalBitmap,
+            0,
+            0,
+            w / 2,
+            h
+        )
+        val rightHalfBitmap = Bitmap.createBitmap(
+            originalBitmap,
+            w / 2,
+            0,
+            w / 2,
+            h
+        )
+        leftHalfDrawable = BitmapDrawable(resources, leftHalfBitmap)
+        rightHalfDrawable = BitmapDrawable(resources, rightHalfBitmap)
     }
 
     private fun onFirstCreate(windowManager: WindowManager) {
@@ -269,9 +287,11 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         val w = wh.first
         if (layoutParams.x < w / 2) {
             layoutParams.x = 0
+            onLeftSide = true
             floatingView.setImageDrawable(rightHalfDrawable)
         } else {
             layoutParams.x = w - viewWidth / 2
+            onLeftSide = false
             floatingView.setImageDrawable(leftHalfDrawable)
         }
         if (center) {
@@ -302,6 +322,27 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
      private fun showPopupMenu() {
          val popupMenu = PopupMenu(this, floatingView)
+         // Remotless: who is connected, and End session for each of them.
+         val clients = activeClients()
+         val endIds = HashMap<Int, Int>() // menu item id -> connection id
+         val idEndAll = 3
+         if (clients.isEmpty()) {
+             popupMenu.menu.add(0, 99, 0, translate("Nobody is connected")).isEnabled = false
+         } else {
+             for ((index, c) in clients.withIndex()) {
+                 popupMenu.menu.add(0, 100 + index, 0, translate("Connected") + ": " + c.label).isEnabled = false
+             }
+             for ((index, c) in clients.withIndex()) {
+                 val itemId = 200 + index
+                 endIds[itemId] = c.id
+                 val title = if (clients.size == 1) translate("End session")
+                     else translate("End session") + ": " + c.name.ifEmpty { c.peerId }
+                 popupMenu.menu.add(0, itemId, 0, title)
+             }
+             if (clients.size > 1) {
+                 popupMenu.menu.add(0, idEndAll, 0, translate("End all sessions"))
+             }
+         }
          val idShowRustDesk = 0
          popupMenu.menu.add(0, idShowRustDesk, 0, translate("Show RustDesk"))
          // For host side, clipboard sync
@@ -329,6 +370,14 @@ class FloatingWindowService : Service(), View.OnTouchListener {
                      stopMainService()
                      true
                  }
+                 idEndAll -> {
+                     clients.forEach { endSession(it.id) }
+                     true
+                 }
+                 in endIds -> {
+                     endSession(endIds[menuItem.itemId]!!)
+                     true
+                 }
                  else -> false
              }
          }
@@ -353,6 +402,51 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         }
     }
 
+    // ---- Remotless: who is connected -----------------------------------------------------
+    private data class ActiveClient(val id: Int, val name: String, val peerId: String) {
+        val label: String
+            get() = when {
+                name.isNotEmpty() && peerId.isNotEmpty() -> name + " (" + peerId + ")"
+                name.isNotEmpty() -> name
+                else -> peerId
+            }
+    }
+
+    /** People whose connection to this phone is accepted and still open. */
+    private fun activeClients(): List<ActiveClient> {
+        return try {
+            val json = FFI.getClientsState()
+            if (json.isEmpty()) return emptyList()
+            val arr = JSONArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.getJSONObject(i)
+                if (o.optBoolean("authorized") && !o.optBoolean("disconnected")) {
+                    ActiveClient(o.optInt("id"), o.optString("name"), o.optString("peer_id"))
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.d(logTag, "activeClients failed: " + e)
+            emptyList()
+        }
+    }
+
+    private fun endSession(id: Int) {
+        Log.d(logTag, "End session " + id + " from the floating bubble")
+        FFI.closeConnection(id)
+    }
+
+    private fun updateLive() {
+        val nowLive = activeClients().isNotEmpty()
+        if (nowLive == live) return
+        live = nowLive
+        buildDrawables()
+        if (dragging) {
+            floatingView.setImageDrawable(originalDrawable)
+        } else {
+            floatingView.setImageDrawable(if (onLeftSide) rightHalfDrawable else leftHalfDrawable)
+        }
+    }
+
     private fun syncClipboard() {
         MainActivity.rdClipboardManager?.syncClipboard(false)
     }
@@ -373,6 +467,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             if (updateKeepScreenOnLayoutParams()) {
                 windowManager.updateViewLayout(floatingView, layoutParams)
             }
+            updateLive()
             handler.postDelayed(this, 1000) // 1000 milliseconds = 1 second
         }
     }
