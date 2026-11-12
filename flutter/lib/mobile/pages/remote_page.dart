@@ -500,7 +500,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   // Remotless: keep MainActivity's PiP aspect ratio in step with the remote screen.
   void _updatePip() {
-    if (!isAndroid || !mounted) return;
+    if (!(isAndroid || isIOS) || !mounted) return;
     final rect = gFFI.ffiModel.displaysRect();
     if (gFFI.ffiModel.pi.isSet.isFalse || rect == null) return;
     final w = rect.width.round(), h = rect.height.round();
@@ -549,7 +549,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (isAndroid) {
+    if (isAndroid || isIOS) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _updatePip());
     }
     // In PiP the normal page stays mounted (offstage) so nothing is torn down.
@@ -748,7 +748,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                             : onPressedTextChat(widget.id),
                                   ))
                         ]) +
-                  (isAndroid && RemotlessPip.supported.value
+                  ((isAndroid || isIOS) && RemotlessPip.supported.value
                       ? <Widget>[
                           IconButton(
                             color: Colors.white,
