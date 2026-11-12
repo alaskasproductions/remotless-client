@@ -1834,7 +1834,9 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
   }
 
   Widget network(BuildContext context) {
-    final hideServer =
+    // Remotless: the server is fixed to app.remotless.com. Changing it would take the PC off
+    // Remotless (ID, company list, reports) and could make the scam shield ask a fake server.
+    final hideServer = bind.isCustomClient() ||
         bind.mainGetBuildinOption(key: kOptionHideServerSetting) == 'Y';
     final hideProxy =
         isWeb || bind.mainGetBuildinOption(key: kOptionHideProxySetting) == 'Y';
