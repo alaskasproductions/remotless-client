@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/common/widgets/remotless_feedback.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -2621,6 +2622,12 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('ID')}: $myId')
                       .marginSymmetric(vertical: 4.0)),
+              // Remotless: feedback and problem reports go straight to our team.
+              ElevatedButton.icon(
+                onPressed: () => showRemotlessFeedback(context),
+                icon: const Icon(Icons.feedback_outlined, size: 18),
+                label: const Text('Send feedback / Report a problem'),
+              ).marginSymmetric(vertical: 8.0),
               // Remotless: own links and company. The RustDesk credit, the AGPL-3.0 notice and the
               // source-code link must stay (AGPL "Appropriate Legal Notices" and source offer).
               InkWell(

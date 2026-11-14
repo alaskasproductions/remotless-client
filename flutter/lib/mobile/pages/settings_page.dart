@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/common/widgets/remotless_feedback.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -1098,6 +1099,12 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                   child: Text(_myId),
                 ),
                 leading: Icon(Icons.perm_identity)),
+            // Remotless: feedback and problem reports go straight to our team.
+            SettingsTile(
+              title: const Text('Send feedback / Report a problem'),
+              onPressed: (context) => showRemotlessFeedback(context),
+              leading: Icon(Icons.feedback_outlined),
+            ),
             SettingsTile(
               title: Text(translate("Privacy Statement")),
               onPressed: (context) =>
