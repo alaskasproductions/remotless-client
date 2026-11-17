@@ -229,7 +229,18 @@ jobs:
           pushd flutter
           flutter build apk --release --target-platform android-arm64,android-arm,android-x64
           # Google Play wants an app bundle; signed with the same key (= Play's upload key).
+          # The Play build leaves out the microphone (audio sharing / voice calls): Play requires a
+          # demo video per foreground service type, and the website APK keeps the full feature set.
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i '/android.permission.RECORD_AUDIO/d; /android.permission.FOREGROUND_SERVICE_MICROPHONE/d' $M
+          sed -i 's/foregroundServiceType="specialUse|mediaProjection|microphone"/foregroundServiceType="specialUse|mediaProjection"/' $M
+          ! grep -qE 'RECORD_AUDIO|FOREGROUND_SERVICE_MICROPHONE|\|microphone' $M || { echo "::error::microphone still in the Play manifest"; exit 1; }
           flutter build appbundle --release --target-platform android-arm64,android-arm,android-x64
+          # Check the manifest that actually went into the bundle (libraries can add permissions back).
+          MM=$(find build/app/intermediates -path '*elease*' -name AndroidManifest.xml -newer $M | xargs grep -l 'com.remotless.app')
+          echo "manifests built for the bundle:"; echo "$MM"
+          [ -n "$MM" ] || { echo "::error::no merged manifest found for the bundle"; exit 1; }
+          ! grep -lE 'RECORD_AUDIO|FOREGROUND_SERVICE_MICROPHONE' $MM || { echo "::error::microphone permission in the Play bundle"; exit 1; }
           popd
           mkdir -p out
           mv ./flutter/build/app/outputs/flutter-apk/app-release.apk "out/${BRAND}-${VERSION}-android.apk"
