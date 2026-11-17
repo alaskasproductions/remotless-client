@@ -922,8 +922,9 @@ showInputWarnAlert(FFI ffi) {
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("Open System Setting", onPressed: submit),
+        // Remotless: Google Play wants an explicit accept/decline for the accessibility disclosure.
+        dialogButton("Not now", onPressed: close, isOutline: true),
+        dialogButton("Agree and open settings", onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,

@@ -1,6 +1,7 @@
 # Remotless: Android build. Trimmed from flutter-build.yml (build-rustdesk-android + the universal APK job),
 # keeping upstream's exact toolchain versions. Builds the Rust library for arm64, armv7 and x86_64, then one
-# universal APK (Remotless-<version>-android.apk) with application ID com.remotless.app.
+# universal APK (Remotless-<version>-android.apk, for the website) and an app bundle
+# (Remotless-<version>-android.aab, for Google Play), application ID com.remotless.app.
 # Run it from the Actions tab ("Run workflow").
 #
 # Signing: the APK is signed with the Remotless release key when the repo has the secrets
@@ -227,9 +228,12 @@ jobs:
           fi
           pushd flutter
           flutter build apk --release --target-platform android-arm64,android-arm,android-x64
+          # Google Play wants an app bundle; signed with the same key (= Play's upload key).
+          flutter build appbundle --release --target-platform android-arm64,android-arm,android-x64
           popd
           mkdir -p out
           mv ./flutter/build/app/outputs/flutter-apk/app-release.apk "out/${BRAND}-${VERSION}-android.apk"
+          mv ./flutter/build/app/outputs/bundle/release/app-release.aab "out/${BRAND}-${VERSION}-android.aab"
           rm -f flutter/android/key.properties
 
       - name: Upload APK
@@ -237,6 +241,12 @@ jobs:
         with:
           name: Remotless-android-${{ env.SIGN == 'true' && 'signed' || 'debug-signed' }}
           path: out/*.apk
+
+      - name: Upload app bundle (Google Play)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Remotless-android-play-bundle${{ env.SIGN == 'true' && '' || '-debug-signed' }}
+          path: out/*.aab
 
       - name: Check the APK
         shell: bash
@@ -251,4 +261,10 @@ jobs:
           # SHA-256 of the Remotless release certificate (keystore in remotless-client-keys on the S: drive).
           if [ "$SIGN" = "true" ] && [[ "$CERTS" != *"0ec0594e2ed317a33087f7d0da365be24f8a29ed94b0d10a2c631ab9b2d09fe8"* ]]; then
             echo "::error::APK is not signed with the Remotless release key"; exit 1
+          fi
+          # The app bundle must carry the same (upload) key.
+          AAB_CERT=$(keytool -printcert -jarfile out/*.aab)
+          echo "$AAB_CERT" | grep -E "Owner|SHA256" || true
+          if [ "$SIGN" = "true" ] && [[ "$AAB_CERT" != *"0E:C0:59:4E"* ]]; then
+            echo "::error::App bundle is not signed with the Remotless release key"; exit 1
           fi
