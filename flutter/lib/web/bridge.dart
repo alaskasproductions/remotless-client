@@ -1523,6 +1523,10 @@ class RustdeskImpl {
     return Future(() => js.context.callMethod('getByName', ['build_date']));
   }
 
+  Future<String> mainGetRecentLog({required int maxBytes, dynamic hint}) {
+    return Future.value('');
+  }
+
   String translate(
       {required String name, required String locale, dynamic hint}) {
     return js.context.callMethod('getByName', [

@@ -2340,6 +2340,57 @@ pub fn main_get_build_date() -> String {
     crate::BUILD_DATE.to_string()
 }
 
+/// Remotless "Send feedback": the end of the app's newest log files (all processes under the
+/// log folder), newest last, at most `max_bytes` in total. Only sent if the person ticks
+/// "Include the app log". Never fails: an unreadable folder gives an empty string.
+pub fn main_get_recent_log(max_bytes: i32) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let max = (max_bytes.max(1024) as u64).min(2 * 1024 * 1024);
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf, u64)> = Vec::new();
+    fn walk(dir: &std::path::Path, depth: u32, out: &mut Vec<(std::time::SystemTime, std::path::PathBuf, u64)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(md) = e.metadata() else { continue };
+            if md.is_dir() {
+                if depth < 3 {
+                    walk(&p, depth + 1, out);
+                }
+            } else if p.extension().map_or(false, |x| x == "log") && md.len() > 0 {
+                out.push((md.modified().unwrap_or(std::time::UNIX_EPOCH), p, md.len()));
+            }
+        }
+    }
+    walk(&hbb_common::config::Config::log_path(), 0, &mut files);
+    files.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    let mut left = max;
+    let mut parts: Vec<String> = Vec::new();
+    for (_, path, len) in files.into_iter().take(6) {
+        if left < 512 {
+            break;
+        }
+        let take = len.min(left);
+        let Ok(mut f) = std::fs::File::open(&path) else { continue };
+        if f.seek(SeekFrom::Start(len - take)).is_err() {
+            continue;
+        }
+        let mut buf = Vec::with_capacity(take as usize);
+        if f.take(take).read_to_end(&mut buf).is_err() {
+            continue;
+        }
+        left -= take;
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        parts.push(format!(
+            "===== {}{} =====\n{}",
+            name,
+            if take < len { " (end only)" } else { "" },
+            String::from_utf8_lossy(&buf)
+        ));
+    }
+    parts.reverse(); // oldest first, newest at the bottom
+    parts.join("\n")
+}
+
 pub fn translate(name: String, locale: String) -> SyncReturn<String> {
     SyncReturn(crate::client::translate_locale(name, &locale))
 }
