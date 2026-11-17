@@ -164,7 +164,20 @@ jobs:
       - name: Install vcpkg dependencies
         run: |
           TRIPLET_ARG=""
-          if [ "${{ matrix.job.cross }}" = "true" ]; then TRIPLET_ARG="--triplet arm64-osx"; fi
+          if [ "${{ matrix.job.cross }}" = "true" ]; then
+            TRIPLET_ARG="--triplet arm64-osx"
+            # vcpkg.json asks for ffmpeg as a *host* package on macOS (host = target on a native build).
+            # When cross-building, host is the Intel runner, so ask for it for the target triplet instead.
+            python3 - <<'PY'
+          import json
+          d = json.load(open('vcpkg.json'))
+          for dep in d['dependencies']:
+              if isinstance(dep, dict) and dep.get('name') == 'ffmpeg' and dep.get('host') and 'osx' in dep.get('platform', ''):
+                  dep['host'] = False
+                  print('ffmpeg: host -> target for the cross build')
+          json.dump(d, open('vcpkg.json', 'w'), indent=2)
+          PY
+          fi
           if ! $VCPKG_ROOT/vcpkg install $TRIPLET_ARG --x-install-root="$VCPKG_ROOT/installed"; then
             find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
               echo "$_1:"; echo "======"; cat "$_1"; echo "======"; echo ""
