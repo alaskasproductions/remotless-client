@@ -34,7 +34,7 @@ jobs:
 
   build-macos:
     needs: [generate-bridge]
-    name: macOS ${{ matrix.job.arch }} (unsigned)
+    name: macOS ${{ matrix.job.arch }}
     runs-on: ${{ matrix.job.os }}
     env:
       # Secrets can't be used in step `if:` conditions, so turn "secret is set" into a plain flag.
@@ -235,7 +235,8 @@ jobs:
             rm -f "$RUNNER_TEMP/asc.json"
             # Gatekeeper's verdict, as a customer's Mac would see it.
             spctl -a -vv -t open --context context:primary-signature "$DMG"
-            xcrun stapler validate "$DMG"
+            # Double-check the stapled ticket (Apple's ticket server sometimes drops the connection: retry).
+            for i in 1 2 3; do xcrun stapler validate "$DMG" && break; [ $i = 3 ] && exit 1; sleep 20; done
           fi
           echo "DMG=$DMG" >> "$GITHUB_ENV"
           ls -la *.dmg
