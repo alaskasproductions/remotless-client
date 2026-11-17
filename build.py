@@ -934,8 +934,17 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
 def build_flutter_dmg(version, features):
     if not skip_cargo:
         # set minimum osx build target, now is 10.14, which is the same as the flutter xcode project
+        # Remotless: REMOTLESS_MAC_TARGET=aarch64-apple-darwin cross-builds the Apple Silicon app on an
+        # Intel Mac (GitHub's arm64 runners are often unavailable). The outputs are copied into
+        # target/release so the rest of the build (Xcode project, service copy) stays unchanged.
+        mac_target = os.environ.get('REMOTLESS_MAC_TARGET', '')
+        target_arg = f' --target {mac_target}' if mac_target else ''
         system2(
-            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --locked --features {features} --release')
+            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --locked --features {features} --release{target_arg}')
+        if mac_target:
+            os.makedirs('target/release', exist_ok=True)
+            for f in ('liblibrustdesk.dylib', 'service'):
+                shutil.copy2(f'target/{mac_target}/release/{f}', f'target/release/{f}')
     # copy dylib
     system2(
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
@@ -943,10 +952,22 @@ def build_flutter_dmg(version, features):
     # cargo builds a single-arch dylib for the host; restrict Xcode to the same arch
     # so the universal-by-default ARCHS_STANDARD doesn't try to link a missing slice.
     # FLUTTER_XCODE_* env vars are forwarded to xcodebuild as build settings.
-    mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
+    mac_target = os.environ.get('REMOTLESS_MAC_TARGET', '')
+    if mac_target:
+        mac_arch = 'arm64' if mac_target.startswith('aarch64') else 'x86_64'
+        only_active = 'NO'  # cross build: the host's "active" arch is not the one we want
+    else:
+        mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
+        only_active = 'YES'
     system2(
-        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
-    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
+        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH={only_active} flutter build macos --release')
+    # Remotless: the bundle is named after PRODUCT_NAME in macos/Runner/Configs/AppInfo.xcconfig.
+    app_name = 'RustDesk'
+    with open('macos/Runner/Configs/AppInfo.xcconfig', encoding='utf-8') as f:
+        for line in f:
+            if line.strip().startswith('PRODUCT_NAME'):
+                app_name = line.split('=', 1)[1].strip()
+    system2(f'cp -rf ../target/release/service ./build/macos/Build/Products/Release/{app_name}.app/Contents/MacOS/')
     '''
     system2(
         "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
