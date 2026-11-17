@@ -1,11 +1,15 @@
 # Remotless: iPhone/iPad build. Trimmed from flutter-build.yml (build-rustdesk-ios), keeping upstream's
-# exact toolchain versions. Builds the Rust library for aarch64-apple-ios and an UNSIGNED app archive
-# (bundle ID com.remotless.app). Run it from the Actions tab ("Run workflow").
+# exact toolchain versions. Builds the Rust library for aarch64-apple-ios, then the app (bundle ID
+# com.remotless.app). Run it from the Actions tab ("Run workflow").
 #
-# Unsigned on purpose: installing on an iPhone or publishing to the App Store needs the Apple Developer
-# Program (TKOCY LTD's team ID, a distribution certificate and a provisioning profile). Until then this
-# workflow proves the app compiles and gives an archive to inspect. Signing steps get added here once
-# the Apple account exists (see flutter/ios/exportOptions.plist for the App Store export settings).
+# Signing + TestFlight (TKOCY LTD, Team ID K42MDMGU82) when the repo has these secrets:
+#   IOS_P12_BASE64 / IOS_P12_PASSWORD   "Apple Distribution: TKOCY LTD" certificate + key (.p12)
+#   IOS_PROVISION_PROFILE_BASE64        App Store profile "Remotless App Store" for com.remotless.app
+#   APP_STORE_CONNECT_API_KEY (.p8 text) / APP_STORE_CONNECT_KEY_ID / APP_STORE_CONNECT_ISSUER_ID
+# The originals live in remotless-client-keys/apple on the S: drive. With them, the signed .ipa is
+# uploaded to App Store Connect and shows up in TestFlight after Apple's processing (~15-30 min).
+# The build number is the workflow run number, so every upload is a new TestFlight build.
+# Without the secrets the build is unsigned (archive only, to check it compiles).
 name: Remotless iOS build
 
 on:
@@ -22,7 +26,7 @@ env:
   FLUTTER_VERSION: "3.24.5"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-  VERSION: "1.6.2"
+  VERSION: "1.6.3"
   BRAND: "Remotless"
 
 jobs:
@@ -31,8 +35,12 @@ jobs:
 
   build-ios:
     needs: [generate-bridge]
-    name: iOS (unsigned)
-    runs-on: macos-latest
+    name: iOS
+    # Intel runner: the arm64 macOS pool keeps cancelling jobs for lack of capacity (Nov 2026).
+    # The app is cross-compiled for iPhones either way.
+    runs-on: macos-15-intel
+    env:
+      SIGN: ${{ secrets.IOS_P12_BASE64 != '' && 'true' || 'false' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -109,22 +117,85 @@ jobs:
           rustup target add aarch64-apple-ios
           cargo build --locked --features flutter,hwcodec --release --target aarch64-apple-ios --lib
 
-      - name: Build app (unsigned)
+      - name: Pick the newest Xcode
+        shell: bash
+        run: |
+          ls -d /Applications/Xcode*.app
+          # App Store uploads must be built with a current SDK; use the newest Xcode on the runner.
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+
+      - name: Import the Apple Distribution certificate
+        if: env.SIGN == 'true'
+        uses: apple-actions/import-codesign-certs@253ddeeac23f2bdad1646faac5c8c2832e800071 # v1
+        with:
+          p12-file-base64: ${{ secrets.IOS_P12_BASE64 }}
+          p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+          keychain: remotless
+
+      - name: Install the provisioning profile
+        if: env.SIGN == 'true'
+        shell: bash
+        env:
+          PROFILE_B64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+        run: |
+          security find-identity -v -p codesigning
+          echo "$PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/remotless.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/remotless.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/profile.plist")
+          NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/profile.plist")
+          echo "Profile: $NAME ($UUID)"
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"; cp "$RUNNER_TEMP/remotless.mobileprovision" "$d/$UUID.mobileprovision"
+          done
+
+      - name: Build app
         shell: bash
         run: |
           pushd flutter
-          flutter build ipa --release --no-codesign
+          if [ "$SIGN" = "true" ]; then
+            flutter build ipa --release --build-name "$VERSION" --build-number "${{ github.run_number }}" \
+              --export-options-plist=ios/exportOptions.plist
+          else
+            # Unsigned: the Runner target asks for manual signing, so switch it off for this build.
+            flutter build ipa --release --build-name "$VERSION" --build-number "${{ github.run_number }}" --no-codesign
+          fi
           popd
           APP=flutter/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app
           [ -d "$APP" ] || { echo "no Runner.app in the archive"; ls -R flutter/build/ios | head -50; exit 1; }
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :CFBundleDisplayName" -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :CFBundleDisplayName" \
+            -c "Print :CFBundleShortVersionString" -c "Print :CFBundleVersion" "$APP/Info.plist"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "com.remotless.app" ] || { echo "wrong bundle ID"; exit 1; }
           mkdir -p out
-          ditto -c -k --sequesterRsrc --keepParent flutter/build/ios/archive/Runner.xcarchive "out/${BRAND}-${VERSION}-ios-unsigned.xcarchive.zip"
+          if [ "$SIGN" = "true" ]; then
+            IPA=$(ls flutter/build/ios/ipa/*.ipa | head -n 1)
+            [ -f "$IPA" ] || { echo "no .ipa exported"; ls -R flutter/build/ios | head -50; exit 1; }
+            cp "$IPA" "out/${BRAND}-${VERSION}-${{ github.run_number }}-ios.ipa"
+            codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier="
+          else
+            ditto -c -k --sequesterRsrc --keepParent flutter/build/ios/archive/Runner.xcarchive "out/${BRAND}-${VERSION}-ios-unsigned.xcarchive.zip"
+          fi
           ls -la out
 
-      - name: Upload unsigned archive
+      - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Remotless-ios-unsigned
-          path: out/*.zip
+          name: Remotless-ios${{ env.SIGN == 'true' && '' || '-unsigned' }}
+          path: out/*
           retention-days: 14
+
+      - name: Upload to TestFlight
+        if: env.SIGN == 'true'
+        shell: bash
+        env:
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$ASC_KEY" > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          IPA=$(ls out/*.ipa)
+          xcrun altool --validate-app -f "$IPA" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER"
+          xcrun altool --upload-app -f "$IPA" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER"
+          rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
