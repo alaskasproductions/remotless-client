@@ -44,6 +44,7 @@ import '../utils/image.dart' as img;
 import '../common/widgets/dialog.dart';
 import 'input_model.dart';
 import 'platform_model.dart';
+import '../mobile/remotless_pip.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 
 import 'package:flutter_hbb/generated_bridge.dart'
@@ -1965,6 +1966,14 @@ class ImageModel with ChangeNotifier {
   }
 
   onRgba(int display, Uint8List rgba) async {
+    // Remotless: iOS picture-in-picture gets the raw frame before it is drawn (and before
+    // nextRgba hands the buffer back to the engine).
+    if (isIOS) {
+      final rect = parent.target?.ffiModel.pi.getDisplayRect(display);
+      if (rect != null) {
+        RemotlessPip.onFrame(rgba, rect.width.toInt(), rect.height.toInt());
+      }
+    }
     try {
       await decodeAndUpdate(display, rgba);
     } catch (e) {
