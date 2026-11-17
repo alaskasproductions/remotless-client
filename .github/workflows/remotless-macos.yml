@@ -1,12 +1,13 @@
 # Remotless: macOS build. Trimmed from flutter-build.yml (build-for-macOS), keeping upstream's exact
 # toolchain versions: Intel on Flutter 3.24.5, Apple Silicon on Flutter 3.44.9 with upstream's 3.44
-# source patches (3.24.5's engine crashes on arm64). Produces UNSIGNED Remotless-<version>-<arch>.dmg
-# files (bundle Remotless.app, ID com.remotless.app). Run it from the Actions tab ("Run workflow").
+# source patches (3.24.5's engine crashes on arm64). Produces Remotless-<version>-<arch>.dmg
+# (bundle Remotless.app, ID com.remotless.app). Run it from the Actions tab ("Run workflow").
 #
-# Unsigned on purpose: customers need a Developer ID signature + Apple notarization (otherwise macOS
-# blocks the first launch and can drop the Screen Recording / Accessibility permissions after updates).
-# That needs TKOCY LTD's Apple Developer Program membership; upstream's signing steps
-# (MACOS_P12_BASE64, MACOS_CODESIGN_IDENTITY, MACOS_NOTARIZE_JSON) get added here once it exists.
+# Signing + notarization (TKOCY LTD, Team ID K42MDMGU82) when the repo has these secrets:
+#   MACOS_P12_BASE64 / MACOS_P12_PASSWORD  "Developer ID Application: TKOCY LTD" certificate + key (.p12)
+#   APP_STORE_CONNECT_API_KEY (.p8 text) / APP_STORE_CONNECT_KEY_ID / APP_STORE_CONNECT_ISSUER_ID
+# The originals live in remotless-client-keys/apple on the S: drive. Without the secrets the dmg is
+# unsigned (-unsigned.dmg), which macOS blocks on first launch: testing only.
 name: Remotless macOS build
 
 on:
@@ -35,6 +36,10 @@ jobs:
     needs: [generate-bridge]
     name: macOS ${{ matrix.job.arch }} (unsigned)
     runs-on: ${{ matrix.job.os }}
+    env:
+      # Secrets can't be used in step `if:` conditions, so turn "secret is set" into a plain flag.
+      SIGN: ${{ secrets.MACOS_P12_BASE64 != '' && 'true' || 'false' }}
+      IDENTITY: "Developer ID Application: TKOCY LTD (K42MDMGU82)"
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +67,34 @@ jobs:
           grep -q '"app.remotless.com"' libs/hbb_common/src/config.rs || { echo "default server not set"; exit 1; }
           grep -q '^PRODUCT_NAME = Remotless$' flutter/macos/Runner/Configs/AppInfo.xcconfig || { echo "macOS app is not named Remotless"; exit 1; }
           grep -q 'customModule="Remotless"' flutter/macos/Runner/Base.lproj/MainMenu.xib || { echo "MainMenu.xib module does not match PRODUCT_NAME"; exit 1; }
+
+      - name: Import the Developer ID certificate
+        if: env.SIGN == 'true'
+        uses: apple-actions/import-codesign-certs@253ddeeac23f2bdad1646faac5c8c2832e800071 # v1
+        with:
+          p12-file-base64: ${{ secrets.MACOS_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
+          keychain: remotless
+
+      - name: Check the signing identity
+        if: env.SIGN == 'true'
+        shell: bash
+        run: |
+          security default-keychain -s remotless.keychain
+          IDS=$(security find-identity -v -p codesigning)
+          echo "$IDS"
+          [[ "$IDS" == *"$IDENTITY"* ]] || { echo "::error::$IDENTITY not in the keychain"; exit 1; }
+
+      - name: Install rcodesign (notarization)
+        if: env.SIGN == 'true'
+        shell: bash
+        run: |
+          pushd /tmp
+          wget -q https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-macos-universal.tar.gz
+          tar -zxf apple-codesign-0.22.0-macos-universal.tar.gz
+          sudo mv apple-codesign-0.22.0-macos-universal/rcodesign /usr/local/bin
+          popd
+          rcodesign --version
 
       - name: Install build runtime
         run: |
@@ -170,19 +203,46 @@ jobs:
           [ -x "$APP/Contents/MacOS/service" ] || { echo "the background service binary was not copied into the app"; exit 1; }
           file "$APP/Contents/MacOS/${BRAND}"
 
-      - name: Create unsigned dmg
+      - name: Sign, package and notarize
+        shell: bash
+        env:
+          ARCH: ${{ matrix.job.arch }}
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          P12_PASS: ${{ secrets.MACOS_P12_PASSWORD }}
         run: |
-          CREATE_DMG="$(command -v create-dmg)"
-          CREATE_DMG="$(readlink -f "$CREATE_DMG")"
+          APP="./flutter/build/macos/Build/Products/Release/${BRAND}.app"
+          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          if [ "$SIGN" = "true" ]; then
+            DMG="${BRAND}-${VERSION}-${ARCH}.dmg"
+            security default-keychain -s remotless.keychain
+            security unlock-keychain -p "$P12_PASS" remotless.keychain
+            bash ./.github/scripts/sign-macos-app.sh "$APP" "$IDENTITY" ./flutter/macos/Runner/Release.entitlements
+          else
+            echo "::warning::No MACOS_P12_BASE64 secret: building an UNSIGNED dmg (testing only)."
+            DMG="${BRAND}-${VERSION}-${ARCH}-unsigned.dmg"
+          fi
           create-dmg --volname "${BRAND}" --icon "${BRAND}.app" 200 190 --hide-extension "${BRAND}.app" \
-            --window-size 800 400 --app-drop-link 600 185 \
-            "${BRAND}-${VERSION}-${{ matrix.job.arch }}-unsigned.dmg" "./flutter/build/macos/Build/Products/Release/${BRAND}.app"
+            --window-size 800 400 --app-drop-link 600 185 "$DMG" "$APP"
+          if [ "$SIGN" = "true" ]; then
+            codesign --force --timestamp -s "$IDENTITY" "$DMG" -vvv
+            printf '%s' "$ASC_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+            rcodesign encode-app-store-connect-api-key -o "$RUNNER_TEMP/asc.json" "$ASC_ISSUER" "$ASC_KEY_ID" "$RUNNER_TEMP/AuthKey.p8"
+            rm -f "$RUNNER_TEMP/AuthKey.p8"
+            rcodesign notary-submit --api-key-path "$RUNNER_TEMP/asc.json" --wait --staple "$DMG"
+            rm -f "$RUNNER_TEMP/asc.json"
+            # Gatekeeper's verdict, as a customer's Mac would see it.
+            spctl -a -vv -t open --context context:primary-signature "$DMG"
+            xcrun stapler validate "$DMG"
+          fi
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
           ls -la *.dmg
 
-      - name: Upload unsigned dmg
+      - name: Upload dmg
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Remotless-macos-${{ matrix.job.arch }}-unsigned
-          path: ${{ env.BRAND }}-${{ env.VERSION }}-${{ matrix.job.arch }}-unsigned.dmg
+          name: Remotless-macos-${{ matrix.job.arch }}${{ env.SIGN == 'true' && '' || '-unsigned' }}
+          path: ${{ env.DMG }}
           retention-days: 14
