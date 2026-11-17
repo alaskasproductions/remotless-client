@@ -14,7 +14,8 @@ lazy_static::lazy_static! {
     static ref CURRENT_2FA: Mutex<Option<(TOTPInfo, TOTP)>> = Mutex::new(None);
 }
 
-const ISSUER: &str = "RustDesk";
+// Remotless: name shown in the customer's authenticator app ("Remotless Connection").
+const ISSUER: &str = "Remotless";
 const TAG_LOGIN: &str = "Connection";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
