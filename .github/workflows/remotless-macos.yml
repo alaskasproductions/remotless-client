@@ -45,8 +45,9 @@ jobs:
       matrix:
         job:
           - { target: x86_64-apple-darwin, os: macos-15-intel, extra-build-args: "", arch: x86_64 }
-          # arm64 on macos-26: the macos-15 arm64 pool kept cancelling jobs for lack of capacity (Nov 2026).
-          - { target: aarch64-apple-darwin, os: macos-26, extra-build-args: "--screencapturekit", arch: aarch64 }
+          # Apple Silicon is cross-built on the Intel runner: GitHub's arm64 macOS pool kept cancelling
+          # jobs for lack of capacity (Nov 2026). cross: true switches vcpkg, cargo and Xcode to arm64.
+          - { target: aarch64-apple-darwin, os: macos-15-intel, extra-build-args: "--screencapturekit", arch: aarch64, cross: true }
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -162,7 +163,9 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          if ! $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"; then
+          TRIPLET_ARG=""
+          if [ "${{ matrix.job.cross }}" = "true" ]; then TRIPLET_ARG="--triplet arm64-osx"; fi
+          if ! $VCPKG_ROOT/vcpkg install $TRIPLET_ARG --x-install-root="$VCPKG_ROOT/installed"; then
             find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
               echo "$_1:"; echo "======"; cat "$_1"; echo "======"; echo ""
             done
@@ -179,6 +182,10 @@ jobs:
             sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
             echo "MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}" >> "$GITHUB_ENV"
           fi
+          if [ "${{ matrix.job.cross }}" = "true" ]; then
+            export REMOTLESS_MAC_TARGET=${{ matrix.job.target }}
+            export VCPKGRS_TRIPLET=arm64-osx
+          fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
       - name: Check the app bundle
@@ -191,6 +198,13 @@ jobs:
           [ -x "$APP/Contents/MacOS/${BRAND}" ] || { echo "no $APP/Contents/MacOS/${BRAND}"; exit 1; }
           [ -x "$APP/Contents/MacOS/service" ] || { echo "the background service binary was not copied into the app"; exit 1; }
           file "$APP/Contents/MacOS/${BRAND}"
+          # The app, its Rust library and the service must all be built for this job's architecture.
+          WANT=$([ "${{ matrix.job.arch }}" = "aarch64" ] && echo arm64 || echo x86_64)
+          for f in "$APP/Contents/MacOS/${BRAND}" "$APP/Contents/MacOS/service" "$APP/Contents/Frameworks/liblibrustdesk.dylib"; do
+            [ -e "$f" ] || continue
+            A=$(lipo -archs "$f"); echo "$f: $A"
+            [ "$A" = "$WANT" ] || { echo "::error::$f is '$A', expected $WANT"; exit 1; }
+          done
 
       - name: Sign, package and notarize
         shell: bash
