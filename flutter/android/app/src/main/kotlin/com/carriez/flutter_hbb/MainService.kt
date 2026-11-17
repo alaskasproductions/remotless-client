@@ -867,6 +867,18 @@ class MainService : Service() {
         }
     }
 
+    // Remotless: the Google Play build ships without the microphone permissions (no audio sharing or
+    // voice calls there). Only ask for the microphone service type when this build declares it, or
+    // Android 14+ would stop the service.
+    private val microphoneDeclared: Boolean by lazy {
+        try {
+            packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+                .requestedPermissions?.contains(android.Manifest.permission.RECORD_AUDIO) == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun foregroundServiceType(): Int {
         var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
@@ -877,7 +889,7 @@ class MainService : Service() {
         if (mediaProjectionForegroundService) {
             serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && microphoneForegroundService) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && microphoneForegroundService && microphoneDeclared) {
             serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }
         return serviceType

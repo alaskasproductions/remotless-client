@@ -1,6 +1,7 @@
 # Remotless: Android build. Trimmed from flutter-build.yml (build-rustdesk-android + the universal APK job),
 # keeping upstream's exact toolchain versions. Builds the Rust library for arm64, armv7 and x86_64, then one
-# universal APK (Remotless-<version>-android.apk) with application ID com.remotless.app.
+# universal APK (Remotless-<version>-android.apk, for the website) and an app bundle
+# (Remotless-<version>-android.aab, for Google Play), application ID com.remotless.app.
 # Run it from the Actions tab ("Run workflow").
 #
 # Signing: the APK is signed with the Remotless release key when the repo has the secrets
@@ -227,9 +228,23 @@ jobs:
           fi
           pushd flutter
           flutter build apk --release --target-platform android-arm64,android-arm,android-x64
+          # Google Play wants an app bundle; signed with the same key (= Play's upload key).
+          # The Play build leaves out the microphone (audio sharing / voice calls): Play requires a
+          # demo video per foreground service type, and the website APK keeps the full feature set.
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i '/android.permission.RECORD_AUDIO/d; /android.permission.FOREGROUND_SERVICE_MICROPHONE/d' $M
+          sed -i 's/foregroundServiceType="specialUse|mediaProjection|microphone"/foregroundServiceType="specialUse|mediaProjection"/' $M
+          ! grep -qE 'RECORD_AUDIO|FOREGROUND_SERVICE_MICROPHONE|\|microphone' $M || { echo "::error::microphone still in the Play manifest"; exit 1; }
+          flutter build appbundle --release --target-platform android-arm64,android-arm,android-x64
+          # Check the manifest that actually went into the bundle (libraries can add permissions back).
+          MM=$(find build/app/intermediates -path '*elease*' -name AndroidManifest.xml -newer $M | xargs grep -l 'com.remotless.app')
+          echo "manifests built for the bundle:"; echo "$MM"
+          [ -n "$MM" ] || { echo "::error::no merged manifest found for the bundle"; exit 1; }
+          ! grep -lE 'RECORD_AUDIO|FOREGROUND_SERVICE_MICROPHONE' $MM || { echo "::error::microphone permission in the Play bundle"; exit 1; }
           popd
           mkdir -p out
           mv ./flutter/build/app/outputs/flutter-apk/app-release.apk "out/${BRAND}-${VERSION}-android.apk"
+          mv ./flutter/build/app/outputs/bundle/release/app-release.aab "out/${BRAND}-${VERSION}-android.aab"
           rm -f flutter/android/key.properties
 
       - name: Upload APK
@@ -237,6 +252,12 @@ jobs:
         with:
           name: Remotless-android-${{ env.SIGN == 'true' && 'signed' || 'debug-signed' }}
           path: out/*.apk
+
+      - name: Upload app bundle (Google Play)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.SIGN == 'true' && 'Remotless-android-play-bundle' || 'Remotless-android-play-bundle-debug-signed' }}
+          path: out/*.aab
 
       - name: Check the APK
         shell: bash
@@ -251,4 +272,10 @@ jobs:
           # SHA-256 of the Remotless release certificate (keystore in remotless-client-keys on the S: drive).
           if [ "$SIGN" = "true" ] && [[ "$CERTS" != *"0ec0594e2ed317a33087f7d0da365be24f8a29ed94b0d10a2c631ab9b2d09fe8"* ]]; then
             echo "::error::APK is not signed with the Remotless release key"; exit 1
+          fi
+          # The app bundle must carry the same (upload) key.
+          AAB_CERT=$(keytool -printcert -jarfile out/*.aab)
+          echo "$AAB_CERT" | grep -E "Owner|SHA256" || true
+          if [ "$SIGN" = "true" ] && [[ "$AAB_CERT" != *"0E:C0:59:4E"* ]]; then
+            echo "::error::App bundle is not signed with the Remotless release key"; exit 1
           fi
