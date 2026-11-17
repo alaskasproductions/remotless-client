@@ -40,7 +40,8 @@ jobs:
       matrix:
         job:
           - { target: x86_64-apple-darwin, os: macos-15-intel, extra-build-args: "", arch: x86_64 }
-          - { target: aarch64-apple-darwin, os: macos-15, extra-build-args: "--screencapturekit", arch: aarch64 }
+          # arm64 on macos-26: the macos-15 arm64 pool kept cancelling jobs for lack of capacity (Nov 2026).
+          - { target: aarch64-apple-darwin, os: macos-26, extra-build-args: "--screencapturekit", arch: aarch64 }
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
