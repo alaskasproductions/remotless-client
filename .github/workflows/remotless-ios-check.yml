@@ -1,0 +1,96 @@
+# Remotless: quick compile check of the Rust library for iOS (aarch64-apple-ios), without the
+# Flutter/Xcode build or any signing. Used while porting the host side (screen sharing from the
+# broadcast extension, see docs/ios-screen-share.md): ~15-25 min instead of the full iOS build.
+name: Remotless iOS Rust check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-screen-share]
+    paths:
+      - "src/**"
+      - "libs/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/remotless-ios-check.yml"
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.75"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+
+concurrency:
+  group: remotless-ios-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  check-ios:
+    needs: [generate-bridge]
+    name: cargo check (aarch64-apple-ios)
+    runs-on: macos-15-intel
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install dependencies
+        run: brew install nasm yasm
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet arm64-ios --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"; echo "======"; cat "$_1"; echo "======"; echo ""
+            done
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-apple-ios
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: remotless-ios-check
+          key: aarch64-apple-ios
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: cargo check
+        run: |
+          cargo check --locked --features flutter,hwcodec --release --target aarch64-apple-ios --lib --message-format short 2>&1 | tee check.log
+          exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Errors
+        if: failure()
+        shell: bash
+        run: grep -E "^(src|libs)/.*(error|warning: unused)" check.log | head -200 || true

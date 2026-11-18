@@ -8,21 +8,21 @@ pub use platform::{
     clip_cursor, get_cursor, get_cursor_data, get_cursor_pos, get_focused_display,
     set_cursor_pos, start_os_service,
 };
-#[cfg(not(any(target_os = "ios")))]
+// Remotless: the server also runs on iOS, inside the ReplayKit broadcast extension
+// (view-only screen sharing, see docs/ios-screen-share.md and src/ios_broadcast.rs).
 /// cbindgen:ignore
 mod server;
-#[cfg(not(any(target_os = "ios")))]
 pub use self::server::*;
 mod client;
 mod lan;
-#[cfg(not(any(target_os = "ios")))]
 mod rendezvous_mediator;
-#[cfg(not(any(target_os = "ios")))]
 pub use self::rendezvous_mediator::*;
 /// cbindgen:ignore
 pub mod common;
-#[cfg(not(any(target_os = "ios")))]
 pub mod ipc;
+#[cfg(target_os = "ios")]
+/// cbindgen:ignore
+pub mod ios_broadcast;
 #[cfg(not(any(
     target_os = "android",
     target_os = "ios",

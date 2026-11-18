@@ -334,6 +334,9 @@ impl RendezvousMediator {
         let start_lan_listening = true;
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let start_lan_listening = crate::platform::is_installed();
+        // Remotless: the iOS broadcast extension only answers the rendezvous server.
+        #[cfg(target_os = "ios")]
+        let start_lan_listening = false;
         if start_lan_listening {
             std::thread::spawn(move || {
                 allow_err!(super::lan::start_listening());

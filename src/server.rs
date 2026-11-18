@@ -136,6 +136,9 @@ pub fn new() -> ServerPtr {
         id_count: hbb_common::rand::random::<i32>() % 1000 + 1000, // ensure positive
     };
     server.add_service(Box::new(audio_service::new()));
+    // Remotless: iOS shares its screen from the broadcast extension (no clipboard there).
+    #[cfg(target_os = "ios")]
+    server.add_service(Box::new(display_service::new()));
     #[cfg(not(target_os = "ios"))]
     {
         server.add_service(Box::new(display_service::new()));
