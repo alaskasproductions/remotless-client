@@ -93,4 +93,5 @@ jobs:
       - name: Errors
         if: failure()
         shell: bash
-        run: grep -E "^(src|libs)/.*(error|warning: unused)" check.log | head -200 || true
+        run: |
+          grep -E "^(src|libs)/.*error" check.log | head -200 || true
