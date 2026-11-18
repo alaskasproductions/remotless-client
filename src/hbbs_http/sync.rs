@@ -33,6 +33,28 @@ pub fn disconnect_reason(id: i32) -> String {
     DISCONNECT_REASONS.lock().unwrap().remove(&id).unwrap_or_else(|| "Closed manually by web console".to_owned())
 }
 
+// Remotless: the iOS screen-sharing extension doesn't sync with the dashboard. These stand-ins
+// let the server code (connection.rs, ipc.rs) build there: no web-console disconnects, not pro.
+#[cfg(target_os = "ios")]
+lazy_static::lazy_static! {
+    static ref SENDER: Mutex<broadcast::Sender<Vec<i32>>> = Mutex::new(broadcast::channel::<Vec<i32>>(16).0);
+}
+
+#[cfg(target_os = "ios")]
+pub fn signal_receiver() -> broadcast::Receiver<Vec<i32>> {
+    SENDER.lock().unwrap().subscribe()
+}
+
+#[cfg(target_os = "ios")]
+pub fn disconnect_reason(_id: i32) -> String {
+    "Closed manually by web console".to_owned()
+}
+
+#[cfg(target_os = "ios")]
+pub fn is_pro() -> bool {
+    false
+}
+
 #[cfg(not(any(target_os = "ios")))]
 pub fn start() {
     let _sender = SENDER.lock().unwrap();

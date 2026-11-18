@@ -316,6 +316,8 @@ impl RendezvousMediator {
                 sleep(1.).await;
             }
         }
+        // Remotless: the iOS broadcast extension doesn't report to the dashboard (no heartbeat).
+        #[cfg(not(target_os = "ios"))]
         crate::hbbs_http::sync::start();
         #[cfg(target_os = "windows")]
         if crate::platform::is_installed() && crate::is_server() {
