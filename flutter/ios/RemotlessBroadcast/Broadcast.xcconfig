@@ -1,0 +1,4 @@
+// Remotless broadcast extension: takes the app's version and build number from Flutter
+// (FLUTTER_BUILD_NAME / FLUTTER_BUILD_NUMBER), as App Store Connect requires them to match.
+// Deliberately not the Runner xcconfigs: those pull in the CocoaPods settings of the app.
+#include "../Flutter/Generated.xcconfig"

@@ -805,6 +805,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       BuildContext context, _ToolbarEdge edge, bool isHorizontal) {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
+    // Remotless: an iPhone/iPad can only be watched (iOS has no remote input).
+    final iosViewOnly = pi.platform == kPeerPlatformIOS;
+    if (iosViewOnly) {
+      toolbarItems.add(_IosViewOnlyBadge(isHorizontal: isHorizontal));
+    }
     toolbarItems.add(Obx(() {
       final privacyModeState = PrivacyModeState.find(widget.id);
       if ((privacyModeState.isEmpty ||
@@ -844,7 +849,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       setFullscreen: _setFullscreen,
     ));
     // Do not show keyboard for camera connection type.
-    if (widget.ffi.connType == ConnType.defaultConn) {
+    if (widget.ffi.connType == ConnType.defaultConn && !iosViewOnly) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
@@ -943,6 +948,43 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       ).copyWith(
               backgroundColor:
                   Theme.of(context).menuBarTheme.style?.backgroundColor)),
+    );
+  }
+}
+
+/// Remotless: says in the toolbar that this session is an iPhone/iPad sharing its screen, which
+/// the technician can watch but not control.
+class _IosViewOnlyBadge extends StatelessWidget {
+  final bool isHorizontal;
+  const _IosViewOnlyBadge({Key? key, required this.isHorizontal})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xff1f6feb);
+    final icon = const Icon(Icons.visibility, color: Colors.white, size: 16);
+    return Tooltip(
+      message: 'iPhone/iPad screen sharing: view only. '
+          'iOS does not allow controlling the device remotely.',
+      child: Container(
+        margin: EdgeInsets.symmetric(
+            horizontal: isHorizontal ? _ToolbarTheme.buttonHMargin : 0,
+            vertical: isHorizontal ? 0 : _ToolbarTheme.buttonHMargin),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+            color: color, borderRadius: BorderRadius.circular(4)),
+        child: isHorizontal
+            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                icon,
+                const SizedBox(width: 6),
+                const Text('View only',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ])
+            : icon,
+      ),
     );
   }
 }

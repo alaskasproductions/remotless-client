@@ -8,6 +8,8 @@ import CoreMedia
 @objc class AppDelegate: FlutterAppDelegate {
   // Remotless: picture-in-picture for remote sessions (see RemotlessPip below).
   private var remotlessPip: RemotlessPip?
+  // Remotless: screen sharing to a technician (RemotlessShareScreen.swift).
+  private var remotlessShare: RemotlessShareScreen?
 
   override func application(
     _ application: UIApplication,
@@ -38,6 +40,12 @@ import CoreMedia
       let channel = FlutterMethodChannel(
         name: "com.remotless/pip", binaryMessenger: flutterVC.binaryMessenger)
       remotlessPip = RemotlessPip(channel: channel, hostIn: flutterVC.view)
+    }
+    // Remotless: iPhone/iPad screen sharing (see RemotlessShareScreen.swift).
+    if remotlessShare == nil, let flutterVC = window?.rootViewController as? FlutterViewController {
+      let channel = FlutterMethodChannel(
+        name: "com.remotless/share_screen", binaryMessenger: flutterVC.binaryMessenger)
+      remotlessShare = RemotlessShareScreen(channel: channel, hostIn: flutterVC.view)
     }
   }
     

@@ -8,6 +8,7 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
+import 'ios_share_page.dart';
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -56,7 +57,22 @@ class HomePageState extends State<HomePage> {
       _chatPageTabIndex = _pages.length;
       _pages.addAll([ChatPage(type: ChatPageType.mobileMain), ServerPage()]);
     }
+    // Remotless: iPhone/iPad screen sharing, view only (see ios_share_page.dart).
+    if (isIOS && !bind.isOutgoingOnly()) {
+      _iosShareTabIndex = _pages.length;
+      _pages.add(IosSharePage());
+      IosShareModel.instance.init();
+    }
     _pages.add(SettingsPage());
+  }
+
+  int _iosShareTabIndex = -1;
+
+  /// Remotless: a technician asked to see the screen; show the tab where the user answers.
+  void showIosShareTab() {
+    if (_iosShareTabIndex >= 0 && _selectedIndex != _iosShareTabIndex) {
+      setState(() => _selectedIndex = _iosShareTabIndex);
+    }
   }
 
   @override

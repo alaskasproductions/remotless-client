@@ -38,6 +38,8 @@ const String kPeerPlatformWindows = "Windows";
 const String kPeerPlatformLinux = "Linux";
 const String kPeerPlatformMacOS = "Mac OS";
 const String kPeerPlatformAndroid = "Android";
+// Remotless: an iPhone/iPad sharing its screen (view only, see docs/ios-screen-share.md).
+const String kPeerPlatformIOS = "iOS";
 const String kPeerPlatformWebDesktop = "WebDesktop";
 
 const double kScrollbarThickness = 12.0;
