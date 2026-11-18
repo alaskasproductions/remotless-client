@@ -35,7 +35,7 @@ jobs:
     name: cargo check (aarch64-apple-ios)
     # Any macOS with an iOS SDK will do for cargo check. On 2026-11-18 macos-15, macos-15-intel and
     # macos-26 all failed with "not acquired by Runner": try another pool when that happens.
-    runs-on: macos-14
+    runs-on: macos-15-intel
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
