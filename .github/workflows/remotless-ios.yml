@@ -14,6 +14,10 @@ name: Remotless iOS build
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner: macos-26 (Xcode 27) or macos-15-intel (Xcode 26, accepted until April 2027; use when macos-26 has no capacity)"
+        default: macos-26
   # Until the workflow is on master (needed for Run workflow), pushes to the ios-app branch build it.
   push:
     branches: [ios-app]
@@ -38,8 +42,8 @@ jobs:
     name: iOS
     # macOS 26 (Apple silicon): has Xcode 27, which App Store uploads need from April 2027
     # (ITMS-90725). The Intel image (macos-15-intel) stops at Xcode 26. In Nov 2026 the arm64 pool
-    # sometimes cancelled jobs for lack of capacity: if that happens, just run the workflow again.
-    runs-on: macos-26
+    # sometimes cancelled jobs for lack of capacity: run again, or pick runner macos-15-intel.
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     env:
       SIGN: ${{ secrets.IOS_P12_BASE64 != '' && 'true' || 'false' }}
     steps:
