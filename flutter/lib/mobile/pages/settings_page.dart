@@ -1121,13 +1121,20 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               ),
             if (bind.isCustomClient())
               SettingsTile(
-                title: Text('Copyright © ${DateTime.now().year} $kRemotlessCompany'),
-                value: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                      'Based on RustDesk, Copyright © Purslane Tech Pte. Ltd., '
-                      'licensed under the GNU AGPL-3.0.',
-                      style: TextStyle(fontSize: 12)),
+                // Both lines in the title: iOS (Cupertino) puts `value` beside the title, and the
+                // long credit squeezed the title into one letter per line.
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Copyright © ${DateTime.now().year} $kRemotlessCompany'),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                          'Based on RustDesk, Copyright © Purslane Tech Pte. Ltd., '
+                          'licensed under the GNU AGPL-3.0.',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
                 ),
                 leading: Icon(Icons.copyright),
               ),
