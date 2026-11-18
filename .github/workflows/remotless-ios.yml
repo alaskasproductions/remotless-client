@@ -36,9 +36,10 @@ jobs:
   build-ios:
     needs: [generate-bridge]
     name: iOS
-    # Intel runner: the arm64 macOS pool keeps cancelling jobs for lack of capacity (Nov 2026).
-    # The app is cross-compiled for iPhones either way.
-    runs-on: macos-15-intel
+    # macOS 26 (Apple silicon): has Xcode 27, which App Store uploads need from April 2027
+    # (ITMS-90725). The Intel image (macos-15-intel) stops at Xcode 26. In Nov 2026 the arm64 pool
+    # sometimes cancelled jobs for lack of capacity: if that happens, just run the workflow again.
+    runs-on: macos-26
     env:
       SIGN: ${{ secrets.IOS_P12_BASE64 != '' && 'true' || 'false' }}
     steps:
@@ -125,6 +126,12 @@ jobs:
           X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)
           sudo xcode-select -s "$X"
           xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          # From April 2027 App Store Connect refuses builds made with an iOS SDK older than 27.
+          SDK_MAJOR=$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)
+          if [ "$SDK_MAJOR" -lt 27 ]; then
+            echo "::warning::Built with the iOS $SDK_MAJOR SDK. App Store uploads need the iOS 27 SDK (Xcode 27) from April 2027: move this job to a runner image with Xcode 27."
+          fi
 
       - name: Import the Apple Distribution certificate
         if: env.SIGN == 'true'
