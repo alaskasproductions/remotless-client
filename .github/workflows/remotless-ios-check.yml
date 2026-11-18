@@ -33,7 +33,8 @@ jobs:
   check-ios:
     needs: [generate-bridge]
     name: cargo check (aarch64-apple-ios)
-    runs-on: macos-15-intel
+    # Apple silicon pool: the Intel one often queues for a long time.
+    runs-on: macos-15
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
