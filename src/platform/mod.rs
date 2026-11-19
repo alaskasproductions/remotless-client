@@ -153,7 +153,7 @@ pub fn get_wakelock(_display: bool) -> WakeLock {
 }
 
 #[cfg(target_os = "ios")]
-pub fn resolutions(_name: &str) -> Vec<hbb_common::message_proto::Resolution> {
+pub fn resolutions(_name: &str) -> Vec<base::message_proto::Resolution> {
     Vec::new()
 }
 
