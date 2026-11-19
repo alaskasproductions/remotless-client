@@ -5223,6 +5223,7 @@ impl Connection {
                             5_000,
                         );
                         if err_msg.is_empty() {
+                            #[cfg(not(target_os = "ios"))]
                             privacy_mode::close_other_remote_connections_for_privacy(self.inner.id);
                             crate::common::make_privacy_mode_msg(
                                 back_notification::PrivacyModeState::PrvOnSucceeded,

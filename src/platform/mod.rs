@@ -137,6 +137,26 @@ impl WakeLock {
     }
 }
 
+// Remotless: stand-ins for the iOS broadcast extension (no user session, no wake lock;
+// iOS keeps a running broadcast alive itself, and the screen size is fixed).
+#[cfg(target_os = "ios")]
+pub fn get_active_username() -> String {
+    "iOS".into()
+}
+
+#[cfg(target_os = "ios")]
+pub struct WakeLock;
+
+#[cfg(target_os = "ios")]
+pub fn get_wakelock(_display: bool) -> WakeLock {
+    WakeLock
+}
+
+#[cfg(target_os = "ios")]
+pub fn resolutions(_name: &str) -> Vec<hbb_common::message_proto::Resolution> {
+    Vec::new()
+}
+
 #[cfg(not(target_os = "ios"))]
 pub fn get_wakelock(_display: bool) -> WakeLock {
     hbb_common::log::info!("new wakelock, require display on: {_display}");
